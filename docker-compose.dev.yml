@@ -1,0 +1,30 @@
+version: '3.9'
+
+# Development infrastructure only — Postgres + Redis.
+# API and Web run locally with hot reload via `pnpm dev`.
+# Usage: docker compose -f docker-compose.dev.yml up -d
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: erp_db
+      POSTGRES_USER: erp
+      POSTGRES_PASSWORD: erp_dev
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"   # accessible at localhost:5433 from your Mac
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U erp"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"   # accessible at localhost:6379
+
+volumes:
+  postgres_dev_data:

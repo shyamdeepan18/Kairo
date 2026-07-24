@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ERP</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* Debit/credit CSS variables — switched via [data-theme='dark'] on <html> */
+      :root {
+        --color-debit: #15803d;
+        --color-credit: #b91c1c;
+        --color-debit-bg: #f0fdf4;
+        --color-credit-bg: #fef2f2;
+      }
+      [data-theme='dark'] {
+        --color-debit: #4ade80;
+        --color-credit: #f87171;
+        --color-debit-bg: rgba(74, 222, 128, 0.08);
+        --color-credit-bg: rgba(248, 113, 113, 0.08);
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

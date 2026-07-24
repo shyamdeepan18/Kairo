@@ -1,0 +1,2 @@
+# Nightly pg_dump files land here (see the `backup` service in docker-compose.yml).
+# This .gitkeep keeps the folder in the repo; the dumps themselves are gitignored.

@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+.turbo/
+*.local
+.DS_Store
+*.tsbuildinfo
+
+# Database backup dumps (see the `backup` service in docker-compose.yml)
+backups/*.dump
