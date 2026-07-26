@@ -13,11 +13,13 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { db } from '@erp/db';
 import {
-  companies, plants, users, roles, userRoles, companyLicense, userRoles as userRolesTable,
-  permissions, rolePermissions,
+  companies, plants, users, roles, userRoles, companyLicense, userRoles as userRolesTable, companyUsers,
+  permissions, rolePermissions, companyModules, documentNumberSeries
 } from '@erp/db';
 import { eq, and, inArray, desc, sql } from 'drizzle-orm';
 import argon2 from 'argon2';
+import { LicenseService } from '../services/license-service.js';
+import type { PermissionService } from '../services/permissions.js';
 
 // ─── guard: system admin only ─────────────────────────────────────────────────
 
@@ -63,11 +65,70 @@ export default async function adminRoutes(app: FastifyInstance) {
   }, async (req, reply) => {
     const { name, baseCurrency = 'INR', ...rest } = req.body;
     if (!name?.trim()) return reply.code(400).send({ error: 'Company name is required' });
-    const [company] = await db.insert(companies).values({
-      name: name.trim(),
-      baseCurrency,
-      ...rest,
-    }).returning();
+
+    const company = await db.transaction(async (tx) => {
+      const [newCompany] = await tx.insert(companies).values({
+        name: name.trim(),
+        baseCurrency,
+        ...rest,
+      }).returning();
+
+      // Auto-provision a default trial license
+      const validTo = new Date();
+      validTo.setMonth(validTo.getMonth() + 1); // 1 month trial
+
+      const [license] = await tx.insert(companyLicense).values({
+        companyId: newCompany.id,
+        edition: 'trial',
+        maxUsers: 5,
+        validFrom: new Date().toISOString().split('T')[0],
+        validTo: validTo.toISOString().split('T')[0],
+      }).returning();
+
+      // Auto-enable core modules
+      const coreModules = [
+        'auth', 'settings', 'purchase', 'sales', 'inventory', 
+        'accounting', 'manufacturing', 'hr', 'payroll'
+      ];
+      
+      await tx.insert(companyModules).values(
+        coreModules.map((module) => ({
+          companyId: newCompany.id,
+          module,
+          isEnabled: true,
+        }))
+      );
+
+      // Auto-provision standard number series
+      const standardSeries = [
+        { documentType: 'purchase.requisition', prefix: 'PR-' },
+        { documentType: 'purchase.po', prefix: 'PO-' },
+        { documentType: 'purchase.grn', prefix: 'GRN-' },
+        { documentType: 'purchase.invoice', prefix: 'PI-' },
+        { documentType: 'purchase.payment', prefix: 'PAY-' },
+        { documentType: 'sales.quotation', prefix: 'SQ-' },
+        { documentType: 'sales.so', prefix: 'SO-' },
+        { documentType: 'sales.delivery', prefix: 'DN-' },
+        { documentType: 'sales.invoice', prefix: 'SI-' },
+        { documentType: 'sales.receipt', prefix: 'RC-' },
+        { documentType: 'manufacturing.bom', prefix: 'BOM-' },
+        { documentType: 'manufacturing.order', prefix: 'MO-' },
+      ];
+
+      await tx.insert(documentNumberSeries).values(
+        standardSeries.map(s => ({
+          companyId: newCompany.id,
+          documentType: s.documentType,
+          prefix: s.prefix,
+          currentNumber: 1,
+          padding: 4,
+          isActive: true
+        }))
+      );
+
+      return newCompany;
+    });
+
     return reply.code(201).send({ company });
   });
 
@@ -154,6 +215,22 @@ export default async function adminRoutes(app: FastifyInstance) {
     preHandler: [app.authenticate, (req, reply) => requireSystemAdmin(req, reply)],
   }, async (req) => {
     const companyId = req.params.id;
+
+    const companyMembers = await db.select({
+      userId: companyUsers.userId,
+    }).from(companyUsers).where(eq(companyUsers.companyId, companyId));
+
+    if (companyMembers.length === 0) return { users: [], total: 0 };
+    const userIds = companyMembers.map(m => m.userId);
+
+    const userList = await db.select({
+      id: users.id,
+      email: users.email,
+      fullName: users.fullName,
+      isActive: users.isActive,
+      lastLoginAt: users.lastLoginAt,
+    }).from(users).where(inArray(users.id, userIds));
+
     const assignments = await db.select({
       userId: userRoles.userId,
       roleId: userRoles.roleId,
@@ -165,18 +242,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       .from(userRoles)
       .leftJoin(roles, eq(userRoles.roleId, roles.id))
       .leftJoin(plants, eq(userRoles.plantId, plants.id))
-      .where(eq(userRoles.companyId, companyId));
-
-    if (assignments.length === 0) return { users: [], total: 0 };
-
-    const userIds = [...new Set(assignments.map((a) => a.userId))];
-    const userList = await db.select({
-      id: users.id,
-      email: users.email,
-      fullName: users.fullName,
-      isActive: users.isActive,
-      lastLoginAt: users.lastLoginAt,
-    }).from(users).where(inArray(users.id, userIds));
+      .where(and(eq(userRoles.companyId, companyId), inArray(userRoles.userId, userIds)));
 
     const result = userList.map((u) => ({
       ...u,
@@ -195,15 +261,19 @@ export default async function adminRoutes(app: FastifyInstance) {
   // ── POST /api/admin/companies/:id/users ──────────────────────────────────
   app.post<{
     Params: { id: string };
-    Body: { fullName: string; email: string; roleId: string; plantId?: string; };
+    Body: { fullName: string; email: string; roleId?: string; plantId?: string; copyFromUserId?: string };
   }>('/companies/:id/users', {
     preHandler: [app.authenticate, (req, reply) => requireSystemAdmin(req, reply)],
   }, async (req, reply) => {
-    const { fullName, email, roleId, plantId } = req.body;
+    const { fullName, email, roleId, plantId, copyFromUserId } = req.body;
     const companyId = req.params.id;
 
-    if (!fullName?.trim() || !email?.trim() || !roleId) {
-      return reply.code(400).send({ error: 'fullName, email, and roleId are required' });
+    if (!fullName?.trim() || !email?.trim()) {
+      return reply.code(400).send({ error: 'fullName and email are required' });
+    }
+
+    if (!roleId && !copyFromUserId) {
+      return reply.code(400).send({ error: 'Either roleId or copyFromUserId must be provided' });
     }
 
     const tempPassword = randomPassword();
@@ -220,21 +290,41 @@ export default async function adminRoutes(app: FastifyInstance) {
         }).returning();
       }
 
-      const existingRole = await tx.select().from(userRoles).where(
-        and(
-          eq(userRoles.userId, u.id),
-          eq(userRoles.companyId, companyId),
-          eq(userRoles.roleId, roleId),
-        ),
-      ).limit(1);
+      const cu = await tx.select().from(companyUsers).where(and(eq(companyUsers.userId, u.id), eq(companyUsers.companyId, companyId))).limit(1);
+      if (!cu.length) {
+        await tx.insert(companyUsers).values({ companyId, userId: u.id });
+      }
 
-      if (!existingRole.length) {
-        await tx.insert(userRoles).values({
-          userId: u.id,
-          companyId,
-          roleId,
-          plantId: plantId ?? null,
-        });
+      if (copyFromUserId) {
+        const sourceRoles = await tx.select().from(userRoles).where(
+          and(eq(userRoles.userId, copyFromUserId), eq(userRoles.companyId, companyId))
+        );
+        for (const sr of sourceRoles) {
+          const existingRole = await tx.select().from(userRoles).where(
+            and(eq(userRoles.userId, u.id), eq(userRoles.companyId, companyId), eq(userRoles.roleId, sr.roleId), eq(userRoles.plantId, sr.plantId))
+          ).limit(1);
+          if (!existingRole.length) {
+            await tx.insert(userRoles).values({
+              userId: u.id,
+              companyId,
+              roleId: sr.roleId,
+              plantId: sr.plantId,
+            });
+          }
+        }
+      } else if (roleId) {
+        const existingRole = await tx.select().from(userRoles).where(
+          and(eq(userRoles.userId, u.id), eq(userRoles.companyId, companyId), eq(userRoles.roleId, roleId))
+        ).limit(1);
+
+        if (!existingRole.length) {
+          await tx.insert(userRoles).values({
+            userId: u.id,
+            companyId,
+            roleId,
+            plantId: plantId ?? null,
+          });
+        }
       }
 
       return u;
@@ -274,19 +364,44 @@ export default async function adminRoutes(app: FastifyInstance) {
   // ── POST /api/admin/companies/:id/roles ──────────────────────────────────
   app.post<{
     Params: { id: string };
-    Body: { name: string; description?: string };
+    Body: { name: string; description?: string; copyFromRoleIds?: string[] };
   }>('/companies/:id/roles', {
     preHandler: [app.authenticate, (req, reply) => requireSystemAdmin(req, reply)],
   }, async (req, reply) => {
-    const { name, description } = req.body;
+    const { name, description, copyFromRoleIds } = req.body;
     if (!name?.trim()) return reply.code(400).send({ error: 'Role name is required' });
-    const [role] = await db.insert(roles).values({
-      companyId: req.params.id,
-      name: name.trim(),
-      description: description?.trim() || null,
-      isSystemRole: false,
-      isActive: true,
-    }).returning();
+
+    const role = await db.transaction(async (tx) => {
+      const [newRole] = await tx.insert(roles).values({
+        companyId: req.params.id,
+        name: name.trim(),
+        description: description?.trim() || null,
+        isSystemRole: false,
+        isActive: true,
+      }).returning();
+
+      if (copyFromRoleIds && copyFromRoleIds.length > 0) {
+        // Fetch all permissions belonging to the selected source roles
+        const sourcePerms = await tx.select({ permissionId: rolePermissions.permissionId })
+          .from(rolePermissions)
+          .where(inArray(rolePermissions.roleId, copyFromRoleIds));
+
+        // Deduplicate permission IDs
+        const uniquePermIds = Array.from(new Set(sourcePerms.map((p) => p.permissionId)));
+
+        if (uniquePermIds.length > 0) {
+          await tx.insert(rolePermissions).values(
+            uniquePermIds.map((pid) => ({
+              roleId: newRole.id,
+              permissionId: pid,
+            }))
+          );
+        }
+      }
+
+      return newRole;
+    });
+
     return reply.code(201).send({ role });
   });
 
@@ -366,6 +481,18 @@ export default async function adminRoutes(app: FastifyInstance) {
       }
     });
 
+    const permSvc = (app as any).permissionService as PermissionService;
+    if (permSvc) {
+      const affectedUsers = await db
+        .selectDistinct({ userId: userRoles.userId })
+        .from(userRoles)
+        .where(and(eq(userRoles.companyId, req.params.id), eq(userRoles.roleId, req.params.roleId)));
+      
+      for (const u of affectedUsers) {
+        await permSvc.invalidateUser(u.userId, req.params.id);
+      }
+    }
+
     return reply.send({ ok: true, grantedCount: grantedCodes.length });
   });
 
@@ -384,6 +511,10 @@ export default async function adminRoutes(app: FastifyInstance) {
       roleId,
       plantId: plantId ?? null,
     }).onConflictDoNothing();
+
+    const permSvc = (app as any).permissionService as PermissionService;
+    if (permSvc) await permSvc.invalidateUser(userId, companyId);
+
     return reply.code(201).send({ ok: true });
   });
 
@@ -408,6 +539,10 @@ export default async function adminRoutes(app: FastifyInstance) {
           eq(userRoles.roleId, roleId),
         ),
       );
+
+      const permSvc = (app as any).permissionService as PermissionService;
+      if (permSvc) await permSvc.invalidateUser(userId, companyId);
+
       return reply.send({ ok: true });
     },
   );
@@ -426,6 +561,10 @@ export default async function adminRoutes(app: FastifyInstance) {
           eq(userRoles.roleId, req.params.roleId),
         ),
       );
+
+      const permSvc = (app as any).permissionService as PermissionService;
+      if (permSvc) await permSvc.invalidateUser(req.params.userId, req.params.id);
+
       return reply.send({ ok: true });
     },
   );
@@ -444,6 +583,23 @@ export default async function adminRoutes(app: FastifyInstance) {
       if (!updated) return reply.code(404).send({ error: 'User not found' });
       return { user: { id: updated.id, email: updated.email, isActive: updated.isActive } };
     },
+  );
+
+  // ── DELETE /api/admin/users/:userId ───────────────────────────────────────
+  app.delete<{ Params: { userId: string } }>(
+    '/users/:userId',
+    {
+      preHandler: [app.authenticate, (req, reply) => requireSystemAdmin(req, reply)],
+    },
+    async (req, reply) => {
+      const [u] = await db.select().from(users).where(eq(users.id, req.params.userId));
+      if (!u) return reply.code(404).send({ error: 'User not found' });
+      if (u.isSystemAdmin) return reply.code(400).send({ error: 'Cannot delete a System Admin' });
+      if (u.isActive) return reply.code(400).send({ error: 'Cannot delete an active user. Please deactivate them first.' });
+
+      await db.delete(users).where(eq(users.id, req.params.userId));
+      return reply.send({ ok: true, message: 'User deleted' });
+    }
   );
 
   // ── POST /api/admin/users/:userId/reset-password ────────────────────────
@@ -502,7 +658,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     Body: {
       edition: string;
       maxUsers: number;
-      validFrom?: string;
+      validFrom: string;
       validTo?: string;
     };
   }>('/companies/:id/license', {
@@ -513,6 +669,9 @@ export default async function adminRoutes(app: FastifyInstance) {
 
     if (typeof maxUsers !== 'number' || maxUsers < -1) {
       return reply.code(400).send({ error: 'maxUsers must be a number >= -1 (-1 = unlimited)' });
+    }
+    if (!validFrom) {
+      return reply.code(400).send({ error: 'validFrom is required' });
     }
 
     const [license] = await db.insert(companyLicense).values({
@@ -543,5 +702,69 @@ export default async function adminRoutes(app: FastifyInstance) {
   }, async (req, reply) => {
     await db.delete(companyLicense).where(eq(companyLicense.companyId, req.params.id));
     return reply.send({ ok: true, message: 'License revoked. Company access is now blocked.' });
+  });
+
+  // ── GET /api/admin/diagnostics/health ───────────────────────────────────────
+  app.get('/diagnostics/health', {
+    preHandler: [app.authenticate, (req, reply) => requireSystemAdmin(req, reply)],
+  }, async (req, reply) => {
+    try {
+      // Query pg_stat_statements for top 10 slowest queries
+      const { rows: slowQueries } = await db.execute(sql`
+        SELECT query, calls, total_exec_time, mean_exec_time, rows 
+        FROM pg_stat_statements 
+        ORDER BY total_exec_time DESC 
+        LIMIT 10
+      `);
+
+      // Query active connections
+      const { rows: activeConnections } = await db.execute(sql`
+        SELECT count(*) as count 
+        FROM pg_stat_activity 
+        WHERE state = 'active'
+      `);
+
+      return {
+        ok: true,
+        slowQueries,
+        activeConnections: activeConnections[0]?.count || 0
+      };
+    } catch (error: any) {
+      if (error.message.includes('pg_stat_statements')) {
+        return reply.code(500).send({ 
+          ok: false, 
+          error: 'pg_stat_statements extension is not installed or preloaded. Please restart the database container.' 
+        });
+      }
+      throw error;
+    }
+  });
+
+  // ── GET /api/admin/diagnostics/audit-logs ───────────────────────────────────
+  app.get<{ Querystring: { limit?: number; offset?: number } }>('/diagnostics/audit-logs', {
+    preHandler: [app.authenticate, (req, reply) => requireSystemAdmin(req, reply)],
+  }, async (req) => {
+    const limit = Number(req.query.limit) || 50;
+    const offset = Number(req.query.offset) || 0;
+
+    const list = await db.execute(sql`
+      SELECT 
+        a.id, a.action, a.entity, a.entity_id as "entityId", 
+        a.details, a.ip_address as "ipAddress", a.created_at as "createdAt",
+        c.name as "companyName", u.email as "userEmail"
+      FROM audit_logs a
+      LEFT JOIN companies c ON a.company_id = c.id
+      LEFT JOIN users u ON a.user_id = u.id
+      ORDER BY a.created_at DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `);
+
+    // Get total count
+    const [{ count }] = await db.execute(sql`SELECT count(*) FROM audit_logs`);
+
+    return { 
+      logs: list.rows, 
+      total: Number(count) 
+    };
   });
 }

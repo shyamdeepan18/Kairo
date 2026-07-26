@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Table, Button, Drawer, Form, DatePicker, Input, Select, Typography, message } from 'antd';
+import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
+import { Table, Button, Drawer, Form, DatePicker, Input, Select, Typography, message, Descriptions } from 'antd';
 import dayjs from 'dayjs';
-import { PlusOutlined } from '@ant-design/icons';
+import { PlusOutlined, EyeOutlined } from '@ant-design/icons';
 import { usePlantStore } from '../../store/plant';
 import { purchaseApi, type PurchaseHeader, type Supplier } from '../../api/purchase';
 import { mastersApi, type Item } from '../../api/masters';
@@ -15,6 +16,7 @@ import {
 const { Title, Text } = Typography;
 
 export function GrnPage() {
+  const { confirmClose } = useUnsavedChanges();
   const { company, plant } = usePlantStore();
   const { cardStyle } = useCardStyle();
   const [form] = Form.useForm();
@@ -26,6 +28,7 @@ export function GrnPage() {
   const [lines, setLines] = useState<DraftLine[]>([newDraftLine()]);
   const [loading, setLoading] = useState(true);
   const [drawer, setDrawer] = useState(false);
+  const [viewing, setViewing] = useState<any | null>(null);
   const [saving, setSaving] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
 
@@ -77,6 +80,12 @@ export function GrnPage() {
     }
   };
 
+  const openView = async (row: PurchaseHeader) => {
+    if (!company?.id) return;
+    try { setViewing(await purchaseApi.grns.get(company.id, row.id)); }
+    catch (e) { message.error(apiErr(e)); }
+  };
+
   const openNew = () => { form.resetFields(); form.setFieldsValue({ postingDate: dayjs(), warehouseId: warehouses[0]?.id }); setLines([newDraftLine()]); setDrawer(true); };
   const save = async (v: any) => {
     if (!company?.id || !plant?.id) { message.error('Select company & plant'); return; }
@@ -111,7 +120,15 @@ export function GrnPage() {
     { title: 'Supplier', key: 's', render: (_: any, r: PurchaseHeader) => <Text style={{ fontSize: 13 }}>{supplierName(r.supplierId)}</Text> },
     { title: 'Date', dataIndex: 'postingDate', render: (v: string) => <Text type="secondary" style={{ fontSize: 12 }}>{v}</Text> },
     { title: 'Status', dataIndex: 'status', render: (v: string) => <StatusBadge status={v as DocumentStatus} size="small" /> },
-    { title: '', key: 'a', align: 'right' as const, width: 180, render: (_: any, r: PurchaseHeader) => <LifecycleButtons status={r.status} onSubmit={() => act(r, 'submit')} onApprove={() => act(r, 'approve')} /> },
+    { 
+      title: '', key: 'a', align: 'right' as const, width: 200, 
+      render: (_: any, r: PurchaseHeader) => (
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <Button type="text" size="small" icon={<EyeOutlined />} onClick={() => openView(r)} />
+          <LifecycleButtons status={r.status} onSubmit={() => act(r, 'submit')} onApprove={() => act(r, 'approve')} />
+        </div>
+      ) 
+    },
   ];
 
   return (
@@ -122,7 +139,7 @@ export function GrnPage() {
       </div>
       <div style={{ marginBottom: 16 }}><Select allowClear placeholder="All statuses" value={statusFilter} onChange={setStatusFilter} style={{ minWidth: 180 }} options={STATUS_OPTIONS} /></div>
       <div style={cardStyle}><Table dataSource={rows} columns={columns} rowKey="id" loading={loading} pagination={{ pageSize: 20, hideOnSinglePage: true }} locale={{ emptyText: 'No GRNs yet.' }} /></div>
-      <Drawer title="New Goods Receipt" open={drawer} onClose={() => setDrawer(false)} width={860} extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>Create</Button>}>
+      <Drawer title="New Goods Receipt" open={drawer} onClose={async () => { if (await confirmClose(form)) { form.resetFields(); setDrawer(false); } }} width={860} extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>Create</Button>}>
         <Form form={form} layout="vertical" onFinish={save} requiredMark={false}>
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
             <Form.Item name="supplierId" label="Supplier" rules={[{ required: true, message: 'Required' }]} style={{ minWidth: 240, flex: 1 }}>
@@ -141,6 +158,29 @@ export function GrnPage() {
           </div>
           <LinesEditor lines={lines} onChange={setLines} items={refItems} taxCodes={[]} showTax={false} showDiscount={false} rateLabel="Rate ₹" />
         </Form>
+      </Drawer>
+
+      <Drawer title={viewing?.documentNumber ?? 'Goods Receipt'} open={!!viewing} onClose={() => setViewing(null)} width={720}>
+        {viewing && (
+          <>
+            <Descriptions column={2} size="small" styles={{ label: { width: 130 } }} bordered>
+              <Descriptions.Item label="Supplier">{supplierName(viewing.supplierId)}</Descriptions.Item>
+              <Descriptions.Item label="Status"><StatusBadge status={viewing.status as DocumentStatus} size="small" /></Descriptions.Item>
+              <Descriptions.Item label="Date">{viewing.postingDate}</Descriptions.Item>
+              <Descriptions.Item label="DC No.">{viewing.supplierDcNo || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Remarks" span={2}>{viewing.remarks || '-'}</Descriptions.Item>
+            </Descriptions>
+            <Table style={{ marginTop: 16 }} size="small" rowKey="id" pagination={false}
+              dataSource={viewing.lines || []}
+              columns={[
+                { title: '#', dataIndex: 'lineNumber', width: 40 },
+                { title: 'Item', dataIndex: 'itemId', render: (v, r: any) => items.find(i => i.id === v)?.itemName || r.description || v },
+                { title: 'Rcvd Qty', dataIndex: 'receivedQty', align: 'right' as const },
+                { title: 'UOM', dataIndex: 'uom', width: 70 },
+                { title: 'Rate ₹', dataIndex: 'ratePaise', align: 'right' as const, render: (v) => `₹${(v / 100).toFixed(2)}` },
+              ]} />
+          </>
+        )}
       </Drawer>
     </div>
   );

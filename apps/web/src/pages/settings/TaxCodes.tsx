@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import {
   Table, Button, Drawer, Form, Input, Select, Switch, Typography, Tag,
   InputNumber, message, Tabs, Spin, theme as antTheme,
@@ -21,6 +22,7 @@ const RATE_TYPES = [
 const bpToPct = (bp: number) => `${(bp / 100).toFixed(bp % 100 === 0 ? 0 : 2)}%`;
 
 function TaxCodesTab() {
+  const { confirmClose } = useUnsavedChanges();
   const { company } = usePlantStore();
   const { token: dt } = antTheme.useToken();
   const [form] = Form.useForm();
@@ -150,7 +152,7 @@ function TaxCodesTab() {
       <Drawer
         title={editing ? 'Edit Tax Code' : 'Add Tax Code'}
         open={drawer}
-        onClose={() => setDrawer(false)}
+        onClose={async () => { if (await confirmClose(form)) { form.resetFields(); setDrawer(false); } }}
         width={420}
         extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>Save</Button>}
       >

@@ -24,10 +24,11 @@ export function LoginPage() {
     setLoading(true);
     try {
       await login(values.email, values.password);
+      localStorage.setItem('erp_last_user', values.email);
       navigate('/select-company', { replace: true });
     } catch (err: any) {
       const msg =
-        err?.response?.data?.error ?? 'Login failed. Please check your credentials.';
+        err?.response?.data?.detail ?? err?.response?.data?.error ?? 'Login failed. Please check your credentials.';
       setError(msg);
     } finally {
       setLoading(false);
@@ -115,22 +116,21 @@ export function LoginPage() {
             autoComplete="off"
             requiredMark={false}
             initialValues={{
-              email: 'admin@erp.com',
-              password: 'password123'
+              email: localStorage.getItem('erp_last_user') || '',
+              password: ''
             }}
           >
             <Form.Item
               name="email"
-              label={<Text style={{ fontSize: 13, fontWeight: 500 }}>Email</Text>}
+              label={<Text style={{ fontSize: 13, fontWeight: 500 }}>Email or User ID</Text>}
               rules={[
-                { required: true, message: 'Email is required' },
-                { type: 'email', message: 'Enter a valid email' },
+                { required: true, message: 'Email or User ID is required' },
               ]}
               style={{ marginBottom: 16 }}
             >
               <Input
                 prefix={<MailOutlined style={{ color: dt.colorTextTertiary }} />}
-                placeholder="you@company.com"
+                placeholder="you@company.com or User ID"
                 style={{ borderRadius: 8 }}
               />
             </Form.Item>

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import {
   Table, Button, Drawer, Form, Input, Select, Switch, Typography, Tag,
   InputNumber, message, Tabs, Row, Col, theme as antTheme,
@@ -16,6 +17,7 @@ const { Title, Text } = Typography;
 const rupees = (paise: number) => (paise / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 });
 
 export function ItemsPage() {
+  const { confirmClose } = useUnsavedChanges();
   const { company } = usePlantStore();
   const { token: dt } = antTheme.useToken();
   const [form] = Form.useForm();
@@ -203,7 +205,7 @@ export function ItemsPage() {
       <Drawer
         title={editing ? 'Edit Item' : 'Add Item'}
         open={drawer}
-        onClose={() => setDrawer(false)}
+        onClose={async () => { if (await confirmClose(form)) { form.resetFields(); setDrawer(false); } }}
         width={560}
         extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>Save</Button>}
       >

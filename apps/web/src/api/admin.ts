@@ -32,6 +32,7 @@ export interface AdminUser {
   email: string;
   fullName: string;
   isActive: boolean;
+  isSystemAdmin?: boolean;
   lastLoginAt?: string;
   roles: Array<{ roleId: string; roleName: string | null; plantId: string | null; plantName?: string | null; plantCode?: string | null }>;
 }
@@ -71,6 +72,24 @@ export interface AdminLicenseInfo {
   isOverLimit: boolean;
 }
 
+export interface AdminDiagnosticsHealth {
+  ok: boolean;
+  slowQueries: any[];
+  activeConnections: number;
+}
+
+export interface AdminAuditLog {
+  id: string;
+  action: string;
+  entity: string;
+  entityId: string | null;
+  details: any;
+  ipAddress: string | null;
+  createdAt: string;
+  companyName: string | null;
+  userEmail: string | null;
+}
+
 export const adminApi = {
   // Companies
   listCompanies: () =>
@@ -97,6 +116,8 @@ export const adminApi = {
     api.post<{ user: AdminUser; tempPassword: string; message: string }>(`/admin/companies/${companyId}/users`, data).then((r) => r.data),
   toggleUser: (userId: string, isActive: boolean) =>
     api.patch<{ user: AdminUser }>(`/admin/users/${userId}/toggle`, { isActive }).then((r) => r.data),
+  deleteUser: (userId: string) =>
+    api.delete(`/admin/users/${userId}`).then((r) => r.data),
   resetUserPassword: (userId: string) =>
     api.post<{ tempPassword: string; message: string }>(`/admin/users/${userId}/reset-password`).then((r) => r.data),
 
@@ -105,7 +126,7 @@ export const adminApi = {
     api.get<{ permissions: AdminPermission[]; total: number }>('/admin/permissions').then((r) => r.data),
   listRoles: (companyId: string) =>
     api.get<{ roles: AdminRole[]; total: number }>(`/admin/companies/${companyId}/roles`).then((r) => r.data),
-  createRole: (companyId: string, data: { name: string; description?: string }) =>
+  createRole: (companyId: string, data: { name: string; description?: string; copyFromRoleIds?: string[] }) =>
     api.post<{ role: AdminRole }>(`/admin/companies/${companyId}/roles`, data).then((r) => r.data),
   updateRole: (companyId: string, roleId: string, data: { name: string; description?: string }) =>
     api.put<{ role: AdminRole }>(`/admin/companies/${companyId}/roles/${roleId}`, data).then((r) => r.data),
@@ -128,5 +149,11 @@ export const adminApi = {
   setLicense: (companyId: string, data: { edition: string; maxUsers: number; validFrom?: string; validTo?: string }) =>
     api.put<{ license: AdminLicense }>(`/admin/companies/${companyId}/license`, data).then((r) => r.data),
   revokeLicense: (companyId: string) =>
-    api.delete(`/admin/companies/${companyId}/license`).then((r) => r.data),
+    api.delete<{ ok: true; message: string }>(`/admin/companies/${companyId}/license`).then((r) => r.data),
+
+  // Diagnostics
+  getSystemHealth: () =>
+    api.get<AdminDiagnosticsHealth>('/admin/diagnostics/health').then((r) => r.data),
+  listAuditLogs: (params: { limit: number; offset: number }) =>
+    api.get<{ logs: AdminAuditLog[]; total: number }>('/admin/diagnostics/audit-logs', { params }).then((r) => r.data),
 };

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import {
   Table, Button, Drawer, Form, Input, Select, Typography, Tag,
   InputNumber, message, Tabs, Row, Col, theme as antTheme,
@@ -18,6 +19,7 @@ const DIM_COLORS: Record<string, string> = {
 };
 
 export function UomPage() {
+  const { confirmClose } = useUnsavedChanges();
   const { company } = usePlantStore();
   const { token: dt } = antTheme.useToken();
   const [uomForm] = Form.useForm();
@@ -174,7 +176,7 @@ export function UomPage() {
       <Drawer
         title="Add Unit of Measure"
         open={uomDrawer}
-        onClose={() => setUomDrawer(false)}
+        onClose={async () => { if (await confirmClose(uomForm)) { uomForm.resetFields(); setUomDrawer(false); } }}
         width={400}
         extra={<Button type="primary" loading={saving} onClick={() => uomForm.submit()}>Save</Button>}
       >
@@ -201,7 +203,7 @@ export function UomPage() {
       <Drawer
         title="Add Conversion"
         open={convDrawer}
-        onClose={() => setConvDrawer(false)}
+        onClose={async () => { if (await confirmClose(convForm)) { convForm.resetFields(); setConvDrawer(false); } }}
         width={420}
         extra={<Button type="primary" loading={saving} onClick={() => convForm.submit()}>Save</Button>}
       >

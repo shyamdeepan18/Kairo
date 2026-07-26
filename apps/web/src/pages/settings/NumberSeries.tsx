@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import {
   Table, Button, Drawer, Form, Input, Select, Switch, Typography, Tag,
   InputNumber, message, Row, Col, Alert, theme as antTheme,
@@ -27,6 +28,7 @@ function buildPreview(v: {
 }
 
 export function NumberSeriesPage() {
+  const { confirmClose } = useUnsavedChanges();
   const { company } = usePlantStore();
   const { token: dt } = antTheme.useToken();
   const [form] = Form.useForm();
@@ -182,7 +184,7 @@ export function NumberSeriesPage() {
       <Drawer
         title={editing ? 'Edit Number Series' : 'Add Number Series'}
         open={drawer}
-        onClose={() => setDrawer(false)}
+        onClose={async () => { if (await confirmClose(form)) { form.resetFields(); setDrawer(false); } }}
         width={460}
         extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>Save</Button>}
       >

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import { Table, Button, Drawer, Form, DatePicker, Input, Select, Typography, message } from 'antd';
 import dayjs from 'dayjs';
 import { PlusOutlined } from '@ant-design/icons';
@@ -16,6 +17,7 @@ import {
 const { Title, Text } = Typography;
 
 export function SalesInvoicesPage() {
+  const { confirmClose } = useUnsavedChanges();
   const { company, plant } = usePlantStore();
   const { cardStyle } = useCardStyle();
   const [form] = Form.useForm();
@@ -87,7 +89,7 @@ export function SalesInvoicesPage() {
       </div>
       <div style={{ marginBottom: 16 }}><Select allowClear placeholder="All statuses" value={statusFilter} onChange={setStatusFilter} style={{ minWidth: 180 }} options={STATUS_OPTIONS} /></div>
       <div style={cardStyle}><Table dataSource={rows} columns={columns} rowKey="id" loading={loading} pagination={{ pageSize: 20, hideOnSinglePage: true }} locale={{ emptyText: 'No invoices yet.' }} /></div>
-      <Drawer title="New Sales Invoice" open={drawer} onClose={() => setDrawer(false)} width={920} extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>Create</Button>}>
+      <Drawer title="New Sales Invoice" open={drawer} onClose={async () => { if (await confirmClose(form)) { form.resetFields(); setDrawer(false); } }} width={920} extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>Create</Button>}>
         <Form form={form} layout="vertical" onFinish={save} requiredMark={false}>
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
             <Form.Item name="customerId" label="Customer" rules={[{ required: true, message: 'Required' }]} style={{ minWidth: 240, flex: 1 }}>

@@ -27,6 +27,7 @@ const PERMISSIONS = [
   { code: 'settings.company.edit',       module: 'settings', documentType: 'company',   action: 'edit',   label: 'Edit company settings' },
   { code: 'settings.plant.create',       module: 'settings', documentType: 'plant',     action: 'create', label: 'Create plants' },
   { code: 'settings.plant.edit',         module: 'settings', documentType: 'plant',     action: 'edit',   label: 'Edit plants' },
+  { code: 'settings.plants.view',        module: 'settings', documentType: 'plant',     action: 'view',   label: 'View plants & warehouses' },
   { code: 'settings.warehouse.create',   module: 'settings', documentType: 'warehouse', action: 'create', label: 'Create warehouses' },
   { code: 'settings.warehouse.edit',     module: 'settings', documentType: 'warehouse', action: 'edit',   label: 'Edit warehouses' },
   { code: 'settings.approvalworkflow.view',   module: 'settings', documentType: 'approvalworkflow', action: 'view',   label: 'View approval workflows' },
@@ -35,6 +36,9 @@ const PERMISSIONS = [
   { code: 'settings.license.manage',     module: 'settings', documentType: 'license',   action: 'manage', label: 'Manage module activation & license' },
 
   // ── Purchase (Phase 6) ─────────────────────────────────────────────────────
+  { code: 'purchase.supplier.view',       module: 'purchase', documentType: 'supplier',     action: 'view',    label: 'View suppliers' },
+  { code: 'purchase.supplier.create',     module: 'purchase', documentType: 'supplier',     action: 'create',  label: 'Create suppliers' },
+  { code: 'purchase.supplier.edit',       module: 'purchase', documentType: 'supplier',     action: 'edit',    label: 'Edit suppliers' },
   { code: 'purchase.requisition.view',    module: 'purchase', documentType: 'requisition', action: 'view',    label: 'View purchase requisitions' },
   { code: 'purchase.requisition.create',  module: 'purchase', documentType: 'requisition', action: 'create',  label: 'Create purchase requisitions' },
   { code: 'purchase.requisition.submit',  module: 'purchase', documentType: 'requisition', action: 'submit',  label: 'Submit purchase requisitions' },
@@ -96,6 +100,9 @@ const PERMISSIONS = [
   { code: 'accounting.depreciation.view',   module: 'accounting', documentType: 'depreciation', action: 'view',    label: 'View depreciation schedules' },
 
   // ── Sales (Phase 7) ────────────────────────────────────────────────────────
+  { code: 'sales.customer.view',          module: 'sales', documentType: 'customer',     action: 'view',    label: 'View customers' },
+  { code: 'sales.customer.create',        module: 'sales', documentType: 'customer',     action: 'create',  label: 'Create customers' },
+  { code: 'sales.customer.edit',          module: 'sales', documentType: 'customer',     action: 'edit',    label: 'Edit customers' },
   { code: 'sales.quotation.view',         module: 'sales', documentType: 'quotation',   action: 'view',    label: 'View quotations' },
   { code: 'sales.quotation.create',       module: 'sales', documentType: 'quotation',   action: 'create',  label: 'Create quotations' },
   { code: 'sales.quotation.submit',       module: 'sales', documentType: 'quotation',   action: 'submit',  label: 'Submit quotations' },
@@ -156,6 +163,7 @@ const PERMISSIONS = [
   
   // ── Admin (Phase 9) ────────────────────────────────────────────────────────
   { code: 'admin.system.manage',          module: 'admin',   documentType: 'system',        action: 'manage',  label: 'Manage global system settings' },
+  { code: 'system.bypass_sod',            module: 'admin',   documentType: 'system',        action: 'bypass_sod', label: 'Bypass Segregation of Duties (Maker/Checker)' },
 ];
 
 // ─── System role definitions ─────────────────────────────────────────────────
@@ -165,6 +173,11 @@ const SYSTEM_ROLES: {
   description: string;
   permissionCodes: string[];
 }[] = [
+  {
+    name: 'Owner',
+    description: 'Full access to all modules and system settings',
+    permissionCodes: PERMISSIONS.map((p) => p.code),
+  },
   {
     name: 'Company Admin',
     description: 'Full access to all modules within a company',

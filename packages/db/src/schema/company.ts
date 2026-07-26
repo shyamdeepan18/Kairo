@@ -5,6 +5,22 @@ import {
 import { sql, relations } from 'drizzle-orm';
 import { users } from './auth.js';
 
+export const companyUsers = pgTable('company_users', {
+  id: uuid('id').default(sql`gen_random_uuid()`).primaryKey(),
+  companyId: uuid('company_id')
+    .notNull()
+    .references(() => companies.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  isActive: boolean('is_active').default(true).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  companyIdx: index('company_users_company_id_idx').on(t.companyId),
+  userIdx: index('company_users_user_id_idx').on(t.userId),
+}));
+
 // ─── companies ───────────────────────────────────────────────────────────────
 // One database can serve multiple companies (multi-tenant).
 // All transactional data is scoped to a company.
@@ -126,6 +142,7 @@ export const companySettings = pgTable(
 export const companiesRelations = relations(companies, ({ many }) => ({
   plants: many(plants),
   warehouses: many(warehouses),
+  companyUsers: many(companyUsers),
 }));
 
 export const plantsRelations = relations(plants, ({ one, many }) => ({
@@ -138,6 +155,11 @@ export const warehousesRelations = relations(warehouses, ({ one }) => ({
   company: one(companies, { fields: [warehouses.companyId], references: [companies.id] }),
 }));
 
+export const companyUsersRelations = relations(companyUsers, ({ one }) => ({
+  company: one(companies, { fields: [companyUsers.companyId], references: [companies.id] }),
+  user: one(users, { fields: [companyUsers.userId], references: [users.id] }),
+}));
+
 // ─── Inferred types ──────────────────────────────────────────────────────────
 
 export type Company    = typeof companies.$inferSelect;
@@ -146,3 +168,5 @@ export type Plant      = typeof plants.$inferSelect;
 export type NewPlant   = typeof plants.$inferInsert;
 export type Warehouse  = typeof warehouses.$inferSelect;
 export type NewWarehouse = typeof warehouses.$inferInsert;
+export type CompanyUser = typeof companyUsers.$inferSelect;
+export type NewCompanyUser = typeof companyUsers.$inferInsert;

@@ -37,8 +37,9 @@ export default fp(async (app: FastifyInstance) => {
           fullName: p.fullName,
           isSystemAdmin: p.isSystemAdmin,
         };
-      } catch {
-        reply.code(401).send({ error: 'Unauthorized' });
+      } catch (e: any) {
+        request.log.error(e, 'JWT Verify failed');
+        reply.code(401).send({ error: 'Unauthorized', details: e.message });
       }
     }
   );

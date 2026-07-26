@@ -13,10 +13,14 @@ import {
   companies, plants, warehouses, users, userRoles, roles, rolePermissions,
   permissions, chartOfAccounts, taxCodes, hsnSacCodes,
   documentNumberSeries, documentTypeConfig,
+  userApprovalLimits, companyUsers,
+  approvalWorkflows,
+  approvalWorkflowLevels,
 } from '@erp/db';
 import type { L2FieldDef, L2Fields } from '@erp/db';
 import { eq, and, inArray, isNull, desc, ilike, or, asc } from 'drizzle-orm';
 import argon2 from 'argon2';
+import { authorize } from '../middleware/authorize.js';
 
 // ─── helpers: number series formatting ─────────────────────────────────────
 
@@ -719,6 +723,115 @@ export default async function settingsRoutes(app: FastifyInstance) {
         })
         .returning();
       return { config: created };
+    }
+  );
+
+  // ── Approval Workflows ────────────────────────────────────────────────────────
+
+  app.get<{ Params: { companyId: string; documentType: string } }>(
+    '/:companyId/workflows/:documentType',
+    { preHandler: [app.authenticate, authorize('settings.approvalworkflow.manage')] },
+    async (req) => {
+      const { companyId, documentType } = req.params;
+
+      const [workflow] = await db
+        .select()
+        .from(approvalWorkflows)
+        .where(
+          and(
+            eq(approvalWorkflows.companyId, companyId),
+            eq(approvalWorkflows.documentType, documentType)
+          )
+        );
+
+      if (!workflow) {
+        return { levels: [] };
+      }
+
+      const levels = await db
+        .select({
+          id: approvalWorkflowLevels.id,
+          level: approvalWorkflowLevels.level,
+          thresholdMinPaise: approvalWorkflowLevels.thresholdMinPaise,
+          thresholdMaxPaise: approvalWorkflowLevels.thresholdMaxPaise,
+          approverType: approvalWorkflowLevels.approverType,
+          approverUserId: approvalWorkflowLevels.approverUserId,
+          approverRoleId: approvalWorkflowLevels.approverRoleId,
+          requiredApprovals: approvalWorkflowLevels.requiredApprovals,
+          isFinal: approvalWorkflowLevels.isFinal,
+        })
+        .from(approvalWorkflowLevels)
+        .where(eq(approvalWorkflowLevels.workflowId, workflow.id))
+        .orderBy(asc(approvalWorkflowLevels.level));
+
+      return { levels };
+    }
+  );
+
+  app.post<{
+    Params: { companyId: string; documentType: string };
+    Body: {
+      levels: {
+        id?: string;
+        level: number;
+        thresholdMinPaise: number;
+        thresholdMaxPaise: number | null;
+        approverType: 'user' | 'role';
+        approverUserId?: string | null;
+        approverRoleId?: string | null;
+        requiredApprovals: number;
+      }[];
+    };
+  }>(
+    '/:companyId/workflows/:documentType',
+    { preHandler: [app.authenticate, authorize('settings.approvalworkflow.manage')] },
+    async (req, reply) => {
+      const { companyId, documentType } = req.params;
+      const { levels } = req.body;
+
+      await db.transaction(async (tx) => {
+        // Upsert workflow
+        const [workflow] = await tx
+          .insert(approvalWorkflows)
+          .values({
+            companyId,
+            documentType,
+            name: `${documentType} Workflow`,
+            isEnabled: true,
+            createdBy: (req.user as { sub: string }).sub,
+          })
+          .onConflictDoUpdate({
+            target: [approvalWorkflows.companyId, approvalWorkflows.documentType],
+            set: { isEnabled: true, updatedAt: new Date(), name: `${documentType} Workflow` },
+          })
+          .returning();
+
+        // Delete existing levels
+        await tx.delete(approvalWorkflowLevels).where(eq(approvalWorkflowLevels.workflowId, workflow.id));
+
+        // Insert new levels
+        if (levels && levels.length > 0) {
+          const newLevels = levels.map((l) => ({
+            workflowId: workflow.id,
+            level: l.level,
+            thresholdMinPaise: l.thresholdMinPaise,
+            thresholdMaxPaise: l.thresholdMaxPaise,
+            approverType: l.approverType,
+            approverUserId: l.approverUserId || null,
+            approverRoleId: l.approverRoleId || null,
+            requiredApprovals: l.requiredApprovals || 1,
+            isFinal: false,
+          }));
+
+          // Mark the last level as final
+          newLevels[newLevels.length - 1].isFinal = true;
+
+          await tx.insert(approvalWorkflowLevels).values(newLevels);
+        }
+      });
+
+      reply.code(200);
+      return { message: 'Workflow updated successfully' };
     }
   );
 }

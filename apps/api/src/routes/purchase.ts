@@ -8,6 +8,8 @@ import {
   goodsReceiptNotes, goodsReceiptNoteLines,
   purchaseInvoices, purchaseInvoiceLines,
   purchasePayments, purchasePaymentAllocations,
+  approvalRequests,
+  users,
 } from '@erp/db';
 import {
   supplierCreateSchema, supplierUpdateSchema,
@@ -237,12 +239,16 @@ function registerRequisitions(app: FastifyInstance) {
     const d = parsed.data;
     const { fiscalYear } = fiscalPeriod(new Date(d.postingDate));
 
+    // Calculate total amount from lines for ApprovalEngine banding
+    const totalAmountPaise = d.lines.reduce((acc, l) => acc + Math.round(l.quantity * (l.estimatedRatePaise || 0)), 0);
+
     const created = await db.transaction(async (tx) => {
       const documentNumber = await app.numberSeriesService.next(tx, d.companyId, DOC, { fiscalYear, plantId: d.plantId });
       const [pr] = await tx.insert(purchaseRequisitions).values({
         companyId: d.companyId, plantId: d.plantId, documentNumber, status: 'draft',
         fiscalYear, postingDate: d.postingDate as any, requiredByDate: d.requiredByDate as any,
         purpose: d.purpose, remarks: d.remarks, createdBy: userId(request),
+        netAmountPaise: totalAmountPaise, totalAmountPaise,
       }).returning();
       await tx.insert(purchaseRequisitionLines).values(
         d.lines.map((l, i) => ({
@@ -261,13 +267,41 @@ function registerRequisitions(app: FastifyInstance) {
     return reply.code(201).send(created);
   });
 
+  app.get('/requisitions/pending-lines', {
+    preHandler: [app.authenticate, resolveCompany, authorize('purchase.requisition.view')],
+  }, async (request) => {
+    const cid = companyId(request);
+    const rows = await db.select({
+      id: purchaseRequisitionLines.id,
+      requisitionId: purchaseRequisitions.id,
+      documentNumber: purchaseRequisitions.documentNumber,
+      postingDate: purchaseRequisitions.postingDate,
+      lineNumber: purchaseRequisitionLines.lineNumber,
+      itemId: purchaseRequisitionLines.itemId,
+      description: purchaseRequisitionLines.description,
+      quantity: purchaseRequisitionLines.quantity,
+      orderedQty: purchaseRequisitionLines.orderedQty,
+      uom: purchaseRequisitionLines.uom,
+      estimatedRatePaise: purchaseRequisitionLines.estimatedRatePaise,
+    })
+    .from(purchaseRequisitionLines)
+    .innerJoin(purchaseRequisitions, eq(purchaseRequisitions.id, purchaseRequisitionLines.requisitionId))
+    .where(and(
+      eq(purchaseRequisitions.companyId, cid),
+      eq(purchaseRequisitions.status, 'approved'),
+      sql`${purchaseRequisitionLines.quantity} > ${purchaseRequisitionLines.orderedQty}`
+    ))
+    .orderBy(desc(purchaseRequisitions.postingDate));
+    return rows;
+  });
+
   app.get('/requisitions', {
     preHandler: [app.authenticate, resolveCompany, authorize('purchase.requisition.view')],
-  }, async (request) => listHeaders(request, purchaseRequisitions));
+  }, async (request) => listHeaders(request, purchaseRequisitions, 'purchase.requisition'));
 
   app.get('/requisitions/:id', {
     preHandler: [app.authenticate, resolveCompany, authorize('purchase.requisition.view')],
-  }, async (request, reply) => getWithLines(reply, purchaseRequisitions, purchaseRequisitionLines, purchaseRequisitionLines.requisitionId, request.params as { id: string }));
+  }, async (request, reply) => getWithLines(request, reply, purchaseRequisitions, purchaseRequisitionLines, purchaseRequisitionLines.requisitionId, request.params as { id: string }, 'purchase.requisition'));
 
   // submit / approve / reject
   simpleTransition(app, { route: '/requisitions/:id/submit', table: purchaseRequisitions, docType: DOC, to: 'submitted', perm: 'purchase.requisition.submit' });
@@ -317,6 +351,15 @@ function registerOrders(app: FastifyInstance) {
           warehouseId: l.warehouseId,
         }))
       );
+
+      // Update ordered qty on linked PR lines
+      const prLinesToUpdate = d.lines.filter(l => l.requisitionLineId);
+      for (const line of prLinesToUpdate) {
+        await tx.update(purchaseRequisitionLines)
+          .set({ orderedQty: sql`${purchaseRequisitionLines.orderedQty} + ${line.quantity}` })
+          .where(eq(purchaseRequisitionLines.id, line.requisitionLineId!));
+      }
+
       await app.auditEngine.logCreate(
         { companyId: d.companyId, documentType: DOC, documentId: po.id, documentNumber, performedBy: userId(request) },
         po, { tx }
@@ -326,17 +369,92 @@ function registerOrders(app: FastifyInstance) {
     return reply.code(201).send(created);
   });
 
+
+  app.put('/orders/:id', {
+    preHandler: [app.authenticate, resolveCompany, authorize('purchase.po.create', { plantFrom: 'body.plantId' })],
+  }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const parsed = poCreateSchema.safeParse(request.body);
+    if (!parsed.success) return bad(reply, parsed);
+    const d = parsed.data;
+    
+    const [existing] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.id, id)).limit(1);
+    if (!existing) return reply.code(404).send({ error: 'Not found' });
+    if (existing.status !== 'draft') return reply.code(409).send({ error: 'Can only edit draft orders' });
+    
+    const computed = d.lines.map((l) => computeLine(l));
+    const totals = headerTotals(computed);
+
+    const updated = await db.transaction(async (tx) => {
+      const [po] = await tx.update(purchaseOrders).set({
+        plantId: d.plantId,
+        supplierId: d.supplierId, requisitionId: d.requisitionId, supplierRef: d.supplierRef,
+        expectedDeliveryDate: d.expectedDeliveryDate as any, paymentTermsDays: d.paymentTermsDays,
+        deliveryWarehouseId: d.deliveryWarehouseId, placeOfSupply: d.placeOfSupply,
+        isReverseCharge: d.isReverseCharge, remarks: d.remarks,
+        netAmountPaise: totals.netAmountPaise, taxAmountPaise: totals.taxAmountPaise,
+        totalAmountPaise: totals.totalAmountPaise, updatedBy: userId(request), updatedAt: new Date(),
+      }).where(eq(purchaseOrders.id, id)).returning();
+      
+      // We don't revert old PR ordered quantities here. For true accuracy we'd diff it, 
+      // but in draft mode, standard practice is to just delete and recreate lines, 
+      // and re-apply PR linked ordered quantities if changed.
+      // Wait, deleting lines and recreating is simpler:
+      
+      // Un-link old lines from PR
+      const oldLines = await tx.select().from(purchaseOrderLines).where(eq(purchaseOrderLines.poId, id));
+      for (const line of oldLines) {
+        if (line.requisitionLineId) {
+          await tx.update(purchaseRequisitionLines)
+            .set({ orderedQty: sql`${purchaseRequisitionLines.orderedQty} - ${line.quantity}` })
+            .where(eq(purchaseRequisitionLines.id, line.requisitionLineId));
+        }
+      }
+      
+      await tx.delete(purchaseOrderLines).where(eq(purchaseOrderLines.poId, id));
+      
+      await tx.insert(purchaseOrderLines).values(
+        d.lines.map((l, i) => ({
+          poId: po.id, lineNumber: i + 1, requisitionLineId: l.requisitionLineId, itemId: l.itemId,
+          description: l.description, quantity: l.quantity.toString(), uom: l.uom,
+          ratePaise: l.ratePaise, discountPercent: String(l.discountPercent ?? 0),
+          discountPaise: computed[i].discountPaise, netAmountPaise: computed[i].netAmountPaise,
+          taxCodeId: l.taxCodeId, hsnSacCode: l.hsnSacCode,
+          cgstAmountPaise: computed[i].cgstAmountPaise, sgstAmountPaise: computed[i].sgstAmountPaise,
+          igstAmountPaise: computed[i].igstAmountPaise, cessAmountPaise: computed[i].cessAmountPaise,
+          taxAmountPaise: computed[i].taxAmountPaise, totalAmountPaise: computed[i].totalAmountPaise,
+          warehouseId: l.warehouseId,
+        }))
+      );
+
+      // Re-link new PR lines
+      const prLinesToUpdate = d.lines.filter(l => l.requisitionLineId);
+      for (const line of prLinesToUpdate) {
+        await tx.update(purchaseRequisitionLines)
+          .set({ orderedQty: sql`${purchaseRequisitionLines.orderedQty} + ${line.quantity}` })
+          .where(eq(purchaseRequisitionLines.id, line.requisitionLineId!));
+      }
+
+      await app.auditEngine.logTransition(
+        { companyId: po.companyId, documentType: DOC, documentId: po.id, documentNumber: po.documentNumber, performedBy: userId(request) },
+        'draft', { status: 'draft', stampFields: {} }, 'Order modified', { tx }
+      );
+      
+      return po;
+    });
+    return reply.send(updated);
+  });
+
   app.get('/orders', {
     preHandler: [app.authenticate, resolveCompany, authorize('purchase.po.view')],
-  }, async (request) => listHeaders(request, purchaseOrders));
+  }, async (request) => listHeaders(request, purchaseOrders, 'purchase.po'));
 
   app.get('/orders/:id', {
     preHandler: [app.authenticate, resolveCompany, authorize('purchase.po.view')],
-  }, async (request, reply) => getWithLines(reply, purchaseOrders, purchaseOrderLines, purchaseOrderLines.poId, request.params as { id: string }));
+  }, async (request, reply) => getWithLines(request, reply, purchaseOrders, purchaseOrderLines, purchaseOrderLines.poId, request.params as { id: string }, 'purchase.po'));
 
   simpleTransition(app, { route: '/orders/:id/submit', table: purchaseOrders, docType: DOC, to: 'submitted', perm: 'purchase.po.submit' });
   
-  // Approval carries an amount limit check against the PO total & Segregation of Duties check.
   app.post('/orders/:id/approve', {
     preHandler: [app.authenticate, resolveCompany, authorize('purchase.po.approve')],
   }, async (request, reply) => {
@@ -344,10 +462,27 @@ function registerOrders(app: FastifyInstance) {
     const remarks = transitionSchema.safeParse(request.body ?? {}).data?.remarks;
     const cid = companyId(request);
     const uid = userId(request);
+    const bypassSod = await app.permissionService.check(uid, 'system.bypass_sod', cid);
     const [row] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.id, id)).limit(1);
     if (!row) return reply.code(404).send({ error: 'Document not found' });
 
-    if (!app.permissionService.validateMakerChecker(uid, row.createdBy, row.submittedBy)) {
+    // 1. Check ApprovalEngine first
+    const [req] = await db.select().from(approvalRequests)
+      .where(and(eq(approvalRequests.documentId, id), eq(approvalRequests.status, 'pending')))
+      .limit(1);
+
+    if (req) {
+      try {
+        const res = await db.transaction((tx) => app.approvalEngine.act(tx, req.id, uid, 'approved', remarks, { bypassSod, bypassSod }));
+        if (!res.finalized) return reply.send({ ok: true, status: 'submitted', detail: res });
+        return reply.send({ ok: true, status: 'approved' }); // Finalized, status already updated by ApprovalEngine
+      } catch (err) {
+        return reply.code(409).send({ error: `Approval action failed: ${(err as Error).message}`, detail: (err as Error).message });
+      }
+    }
+
+    // 2. Fallback to old basic limits
+    if (!app.permissionService.validateMakerChecker(uid, row.createdBy, row.submittedBy, bypassSod)) {
       return reply.code(403).send({ error: 'Segregation of duties violation: Document maker/submitter cannot approve.' });
     }
 
@@ -457,11 +592,11 @@ function registerGrns(app: FastifyInstance) {
 
   app.get('/grns', {
     preHandler: [app.authenticate, resolveCompany, authorize('purchase.grn.view')],
-  }, async (request) => listHeaders(request, goodsReceiptNotes));
+  }, async (request) => listHeaders(request, goodsReceiptNotes, 'purchase.grn'));
 
   app.get('/grns/:id', {
     preHandler: [app.authenticate, resolveCompany, authorize('purchase.grn.view')],
-  }, async (request, reply) => getWithLines(reply, goodsReceiptNotes, goodsReceiptNoteLines, goodsReceiptNoteLines.grnId, request.params as { id: string }));
+  }, async (request, reply) => getWithLines(request, reply, goodsReceiptNotes, goodsReceiptNoteLines, goodsReceiptNoteLines.grnId, request.params as { id: string }, 'purchase.grn'));
 
   simpleTransition(app, { route: '/grns/:id/submit', table: goodsReceiptNotes, docType: DOC, to: 'submitted', perm: 'purchase.grn.submit' });
 
@@ -473,19 +608,28 @@ function registerGrns(app: FastifyInstance) {
     const remarks = transitionSchema.safeParse(request.body ?? {}).data?.remarks;
     const cid = companyId(request);
     const uid = userId(request);
+    const bypassSod = await app.permissionService.check(uid, 'system.bypass_sod', cid);
 
     const [grn] = await db.select().from(goodsReceiptNotes).where(eq(goodsReceiptNotes.id, id)).limit(1);
     if (!grn) return reply.code(404).send({ error: 'GRN not found' });
     if (grn.status !== 'submitted') return reply.code(409).send({ error: `GRN must be submitted (is '${grn.status}')` });
 
-    if (!app.permissionService.validateMakerChecker(uid, grn.createdBy, grn.submittedBy)) {
+    const [req] = await db.select().from(approvalRequests).where(and(eq(approvalRequests.documentId, id), eq(approvalRequests.status, 'pending'))).limit(1);
+
+    if (!req && !app.permissionService.validateMakerChecker(uid, grn.createdBy, grn.submittedBy, bypassSod)) {
       return reply.code(403).send({ error: 'Segregation of duties violation: Document maker/submitter cannot approve.' });
     }
 
     const lines = await db.select().from(goodsReceiptNoteLines).where(eq(goodsReceiptNoteLines.grnId, id));
 
     try {
-      const journalEntryId = await db.transaction(async (tx) => {
+      const result = await db.transaction(async (tx) => {
+        if (req) {
+          const actRes = await app.approvalEngine.act(tx, req.id, uid, 'approved', remarks, { skipFinalizeDoc: true, bypassSod, bypassSod });
+          if (!actRes.finalized) {
+            return { status: 'submitted', detail: actRes };
+          }
+        }
         // 1. Stock IN at landed cost
         await app.stockLedger.postBatch(tx, lines.map((l) => ({
           companyId: cid, plantId: grn.plantId, warehouseId: l.warehouseId ?? grn.warehouseId,
@@ -525,9 +669,9 @@ function registerGrns(app: FastifyInstance) {
           await tx.update(purchaseOrders).set({ receiptStatus: 'partial', updatedAt: new Date() })
             .where(eq(purchaseOrders.id, grn.poId));
         }
-        return jeId;
+        return { status: 'approved', journalEntryId: jeId };
       });
-      return reply.send({ ok: true, journalEntryId });
+      return reply.send({ ok: true, ...result });
     } catch (err) {
       request.log.error(err);
       return reply.code(409).send({ error: 'GRN approval failed', detail: (err as Error).message });
@@ -603,11 +747,11 @@ function registerInvoices(app: FastifyInstance) {
 
   app.get('/invoices', {
     preHandler: [app.authenticate, resolveCompany, authorize('purchase.invoice.view')],
-  }, async (request) => listHeaders(request, purchaseInvoices));
+  }, async (request) => listHeaders(request, purchaseInvoices, 'purchase.invoice'));
 
   app.get('/invoices/:id', {
     preHandler: [app.authenticate, resolveCompany, authorize('purchase.invoice.view')],
-  }, async (request, reply) => getWithLines(reply, purchaseInvoices, purchaseInvoiceLines, purchaseInvoiceLines.invoiceId, request.params as { id: string }));
+  }, async (request, reply) => getWithLines(request, reply, purchaseInvoices, purchaseInvoiceLines, purchaseInvoiceLines.invoiceId, request.params as { id: string }, 'purchase.invoice'));
 
   simpleTransition(app, { route: '/invoices/:id/submit', table: purchaseInvoices, docType: DOC, to: 'submitted', perm: 'purchase.invoice.create' });
 
@@ -619,19 +763,28 @@ function registerInvoices(app: FastifyInstance) {
     const remarks = transitionSchema.safeParse(request.body ?? {}).data?.remarks;
     const cid = companyId(request);
     const uid = userId(request);
+    const bypassSod = await app.permissionService.check(uid, 'system.bypass_sod', cid);
 
     const [inv] = await db.select().from(purchaseInvoices).where(eq(purchaseInvoices.id, id)).limit(1);
     if (!inv) return reply.code(404).send({ error: 'Invoice not found' });
     if (inv.status !== 'submitted') return reply.code(409).send({ error: `Invoice must be submitted (is '${inv.status}')` });
 
-    if (!app.permissionService.validateMakerChecker(uid, inv.createdBy, inv.submittedBy)) {
+    const [req] = await db.select().from(approvalRequests).where(and(eq(approvalRequests.documentId, id), eq(approvalRequests.status, 'pending'))).limit(1);
+
+    if (!req && !app.permissionService.validateMakerChecker(uid, inv.createdBy, inv.submittedBy, bypassSod)) {
       return reply.code(403).send({ error: 'Segregation of duties violation: Document maker/submitter cannot approve.' });
     }
 
     const lines = await db.select().from(purchaseInvoiceLines).where(eq(purchaseInvoiceLines.invoiceId, id));
 
     try {
-      const journalEntryId = await db.transaction(async (tx) => {
+      const result = await db.transaction(async (tx) => {
+        if (req) {
+          const actRes = await app.approvalEngine.act(tx, req.id, uid, 'approved', remarks, { skipFinalizeDoc: true, bypassSod, bypassSod });
+          if (!actRes.finalized) {
+            return { status: 'submitted', detail: actRes };
+          }
+        }
         const { fiscalYear, period } = fiscalPeriod(new Date(inv.postingDate));
         const ctx: PostingContext = {
           companyId: cid, plantId: inv.plantId, documentType: DOC, documentId: inv.id,
@@ -650,9 +803,9 @@ function registerInvoices(app: FastifyInstance) {
           await tx.update(purchaseOrders).set({ billingStatus: 'partial', updatedAt: new Date() })
             .where(eq(purchaseOrders.id, inv.poId));
         }
-        return jeId;
+        return { status: 'approved', journalEntryId: jeId };
       });
-      return reply.send({ ok: true, journalEntryId });
+      return reply.send({ ok: true, ...result });
     } catch (err) {
       request.log.error(err);
       return reply.code(409).send({ error: 'Invoice approval failed', detail: (err as Error).message });
@@ -717,7 +870,7 @@ function registerPayments(app: FastifyInstance) {
 
   app.get('/payments', {
     preHandler: [app.authenticate, resolveCompany, authorize('purchase.payment.view')],
-  }, async (request) => listHeaders(request, purchasePayments));
+  }, async (request) => listHeaders(request, purchasePayments, 'purchase.payment'));
 
   app.get('/payments/:id', {
     preHandler: [app.authenticate, resolveCompany, authorize('purchase.payment.view')],
@@ -726,7 +879,12 @@ function registerPayments(app: FastifyInstance) {
     const [row] = await db.select().from(purchasePayments).where(eq(purchasePayments.id, id)).limit(1);
     if (!row) return reply.code(404).send({ error: 'Payment not found' });
     const allocations = await db.select().from(purchasePaymentAllocations).where(eq(purchasePaymentAllocations.paymentId, id));
-    return { ...row, allocations };
+    const doc = { ...row, allocations };
+    if (app.approvalEngine) {
+      const [decorated] = await app.approvalEngine.decorateDocuments(row.companyId, userId(request), [doc], 'purchase.payment');
+      return decorated;
+    }
+    return doc;
   });
 
   simpleTransition(app, { route: '/payments/:id/submit', table: purchasePayments, docType: DOC, to: 'submitted', perm: 'purchase.payment.create' });
@@ -739,19 +897,28 @@ function registerPayments(app: FastifyInstance) {
     const remarks = transitionSchema.safeParse(request.body ?? {}).data?.remarks;
     const cid = companyId(request);
     const uid = userId(request);
+    const bypassSod = await app.permissionService.check(uid, 'system.bypass_sod', cid);
 
     const [pay] = await db.select().from(purchasePayments).where(eq(purchasePayments.id, id)).limit(1);
     if (!pay) return reply.code(404).send({ error: 'Payment not found' });
     if (pay.status !== 'submitted') return reply.code(409).send({ error: `Payment must be submitted (is '${pay.status}')` });
 
-    if (!app.permissionService.validateMakerChecker(uid, pay.createdBy, pay.submittedBy)) {
+    const [req] = await db.select().from(approvalRequests).where(and(eq(approvalRequests.documentId, id), eq(approvalRequests.status, 'pending'))).limit(1);
+
+    if (!req && !app.permissionService.validateMakerChecker(uid, pay.createdBy, pay.submittedBy, bypassSod)) {
       return reply.code(403).send({ error: 'Segregation of duties violation: Document maker/submitter cannot approve.' });
     }
 
     const allocations = await db.select().from(purchasePaymentAllocations).where(eq(purchasePaymentAllocations.paymentId, id));
 
     try {
-      const journalEntryId = await db.transaction(async (tx) => {
+      const result = await db.transaction(async (tx) => {
+        if (req) {
+          const actRes = await app.approvalEngine.act(tx, req.id, uid, 'approved', remarks, { skipFinalizeDoc: true, bypassSod, bypassSod });
+          if (!actRes.finalized) {
+            return { status: 'submitted', detail: actRes };
+          }
+        }
         const { fiscalYear, period } = fiscalPeriod(new Date(pay.postingDate));
         const ctx: PostingContext = {
           companyId: cid, plantId: pay.plantId, documentType: DOC, documentId: pay.id,
@@ -775,9 +942,9 @@ function registerPayments(app: FastifyInstance) {
             .set({ paidAmountPaise: newPaid, paymentStatus: status, updatedAt: new Date() })
             .where(eq(purchaseInvoices.id, a.invoiceId));
         }
-        return jeId;
+        return { status: 'approved', journalEntryId: jeId };
       });
-      return reply.send({ ok: true, journalEntryId });
+      return reply.send({ ok: true, ...result });
     } catch (err) {
       request.log.error(err);
       return reply.code(409).send({ error: 'Payment approval failed', detail: (err as Error).message });
@@ -787,23 +954,66 @@ function registerPayments(app: FastifyInstance) {
 
 // ─── Generic list / get / simple-transition helpers ─────────────────────────
 
-async function listHeaders(request: FastifyRequest, table: any) {
+async function listHeaders(request: FastifyRequest, table: any, docType?: string) {
   const cid = companyId(request);
   const q = request.query as Record<string, unknown>;
   const { page, pageSize, limit, offset } = paginate(q);
   const filters = [eq(table.companyId, cid)];
   if (q.status) filters.push(eq(table.status, String(q.status)));
-  const data = await db.select().from(table).where(and(...filters))
-    .orderBy(desc(table.createdAt)).limit(limit).offset(offset);
+  
+  const rawData = await db.select({
+    doc: table,
+    creatorName: users.fullName,
+  })
+  .from(table)
+  .leftJoin(users, eq(table.createdBy, users.id))
+  .where(and(...filters))
+  .orderBy(desc(table.createdAt))
+  .limit(limit).offset(offset);
+
+  const data = rawData.map(r => ({ ...r.doc, createdByName: r.creatorName }));
+  let decorated = data;
+  if (docType && request.server.approvalEngine) {
+    decorated = await request.server.approvalEngine.decorateDocuments(cid, userId(request), data, docType);
+  }
+
   const [{ count }] = await db.select({ count: sql<number>`count(*)::int` }).from(table).where(and(...filters));
-  return { data, total: count, page, pageSize };
+  return { data: decorated, total: count, page, pageSize };
 }
 
-async function getWithLines(reply: FastifyReply, table: any, linesTable: any, fk: any, params: { id: string }) {
+async function getWithLines(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  table: any,
+  linesTable: any,
+  fk: any,
+  params: { id: string },
+  docType?: string
+) {
   const [header] = await db.select().from(table).where(eq(table.id, params.id)).limit(1);
   if (!header) return reply.code(404).send({ error: 'Not found' });
+  
+  let createdByName: string | undefined = undefined;
+  let submittedByName: string | undefined = undefined;
+  
+  if (header.createdBy) {
+    const [u] = await db.select({ fullName: users.fullName }).from(users).where(eq(users.id, header.createdBy)).limit(1);
+    if (u) createdByName = u.fullName;
+  }
+  
+  if (header.submittedBy) {
+    const [u] = await db.select({ fullName: users.fullName }).from(users).where(eq(users.id, header.submittedBy)).limit(1);
+    if (u) submittedByName = u.fullName;
+  }
+
   const lines = await db.select().from(linesTable).where(eq(fk, params.id));
-  return { ...header, lines };
+  const doc = { ...header, createdByName, submittedByName, lines };
+  
+  if (docType && request.server.approvalEngine) {
+    const [decorated] = await request.server.approvalEngine.decorateDocuments(header.companyId, userId(request), [doc], docType);
+    return decorated;
+  }
+  return doc;
 }
 
 /** Registers a POST :route that performs a draft→submitted / submitted→approved etc. transition. */
@@ -812,25 +1022,74 @@ function simpleTransition(
   cfg: { route: string; table: any; docType: string; to: DocumentStatus; perm: string }
 ) {
   app.post(cfg.route, {
-    preHandler: [app.authenticate, resolveCompany, authorize(cfg.perm)],
+    preHandler: [app.authenticate, resolveCompany],
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const remarks = transitionSchema.safeParse(request.body ?? {}).data?.remarks;
     const cid = companyId(request);
     const [row] = await db.select().from(cfg.table).where(eq(cfg.table.id, id)).limit(1);
     if (!row) return reply.code(404).send({ error: 'Document not found' });
+    const uid = userId(request);
+    const bypassSod = await app.permissionService.check(uid, 'system.bypass_sod', cid);
 
-    if (cfg.to === 'approved') {
-      const uid = userId(request);
-      if (!app.permissionService.validateMakerChecker(uid, row.createdBy, row.submittedBy)) {
+    const hasBasePerm = await app.permissionService.check(uid, cfg.perm, cid, row.plantId);
+
+    if (cfg.to === 'approved' || cfg.to === 'rejected') {
+      // Check if there's a pending ApprovalRequest for this document
+      const [req] = await db.select().from(approvalRequests)
+        .where(and(eq(approvalRequests.documentId, id), eq(approvalRequests.status, 'pending')))
+        .limit(1);
+
+      if (req) {
+        try {
+          const res = await db.transaction((tx) => app.approvalEngine.act(tx, req.id, uid, cfg.to as 'approved' | 'rejected', remarks, { bypassSod, bypassSod }));
+          if (res.finalized) return reply.send({ ok: true, status: res.decision });
+          return reply.send({ ok: true, status: 'submitted', detail: res });
+        } catch (err) {
+          return reply.code(409).send({ error: `Approval action failed: ${(err as Error).message}`, detail: (err as Error).message });
+        }
+      }
+
+      // No engine - require base permission
+      if (!hasBasePerm) {
+        return reply.code(403).send({ error: `Missing permission: ${cfg.perm}` });
+      }
+
+      if (cfg.to === 'approved' && !app.permissionService.validateMakerChecker(uid, row.createdBy, row.submittedBy, bypassSod)) {
         return reply.code(403).send({ error: 'Segregation of duties violation: Document maker/submitter cannot approve.' });
       }
+    } else {
+      // For submit, cancel, etc.
+      if (!hasBasePerm) {
+        return reply.code(403).send({ error: `Missing permission: ${cfg.perm}` });
+      }
     }
+
+    if (cfg.to === 'submitted') {
+      try {
+        const res = await db.transaction(async (tx) => {
+          const startRes = await app.approvalEngine.start(tx, {
+            companyId: cid, documentType: cfg.docType, documentId: id,
+            documentNumber: row.documentNumber, amountPaise: row.totalAmountPaise, createdBy: row.createdBy
+          });
+          await applyTransition(app, {
+            client: tx, table: cfg.table, docType: cfg.docType, id, companyId: cid,
+            documentNumber: row.documentNumber, fromStatus: row.status as DocumentStatus,
+            toStatus: cfg.to, userId: uid, remarks,
+          });
+          return startRes;
+        });
+        return reply.send({ ok: true, status: cfg.to, detail: res });
+      } catch (err) {
+        return reply.code(409).send({ error: 'Submit action failed', detail: (err as Error).message });
+      }
+    }
+
     try {
       await applyTransition(app, {
         client: db, table: cfg.table, docType: cfg.docType, id, companyId: cid,
         documentNumber: row.documentNumber, fromStatus: row.status as DocumentStatus,
-        toStatus: cfg.to, userId: userId(request), remarks,
+        toStatus: cfg.to, userId: uid, remarks,
       });
       return reply.send({ ok: true, status: cfg.to });
     } catch (err) {

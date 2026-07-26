@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import { Table, Button, Drawer, Form, DatePicker, Select, InputNumber, Typography, Descriptions, message, Tabs, Space, Popconfirm } from 'antd';
 import { PlusOutlined, EyeOutlined, PlayCircleOutlined, CheckSquareOutlined, StopOutlined } from '@ant-design/icons';
 import { usePlantStore } from '../../store/plant';
@@ -12,6 +13,7 @@ import { useCardStyle, STATUS_OPTIONS, apiErr, LifecycleButtons } from '../_shar
 const { Title, Text } = Typography;
 
 export function ProductionOrdersPage() {
+  const { confirmClose } = useUnsavedChanges();
   const { company, plant } = usePlantStore();
   const { cardStyle } = useCardStyle();
   const [form] = Form.useForm();
@@ -111,7 +113,7 @@ export function ProductionOrdersPage() {
           ]} />
       </div>
 
-      <Drawer title="New Production Order" open={drawer} onClose={() => setDrawer(false)} width={500} extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>Create</Button>}>
+      <Drawer title="New Production Order" open={drawer} onClose={async () => { if (await confirmClose(form)) { form.resetFields(); setDrawer(false); } }} width={500} extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>Create</Button>}>
         <Form form={form} layout="vertical" onFinish={save} requiredMark={false}>
           <Form.Item name="formulaId" label="Formula" rules={[{ required: true }]}><Select showSearch optionFilterProp="label" options={formulaOpts} /></Form.Item>
           <div style={{ display: 'flex', gap: 16 }}>

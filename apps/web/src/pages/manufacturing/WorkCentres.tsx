@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import { Table, Button, Drawer, Form, Input, InputNumber, Typography, message } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { usePlantStore } from '../../store/plant';
@@ -9,6 +10,7 @@ import { AmountDisplay } from '../../components/shared/AmountDisplay';
 const { Title, Text } = Typography;
 
 export function WorkCentresPage() {
+  const { confirmClose } = useUnsavedChanges();
   const { company } = usePlantStore();
   const { cardStyle } = useCardStyle();
   const [form] = Form.useForm();
@@ -66,7 +68,7 @@ export function WorkCentresPage() {
         <Table dataSource={rows} columns={columns} rowKey="id" loading={loading} pagination={{ pageSize: 20, hideOnSinglePage: true }} locale={{ emptyText: 'No work centres defined.' }} />
       </div>
 
-      <Drawer title="New Work Centre" open={drawer} onClose={() => setDrawer(false)} width={400} extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>Create</Button>}>
+      <Drawer title="New Work Centre" open={drawer} onClose={async () => { if (await confirmClose(form)) { form.resetFields(); setDrawer(false); } }} width={400} extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>Create</Button>}>
         <Form form={form} layout="vertical" onFinish={save} requiredMark={false}>
           <Form.Item name="code" label="Code" rules={[{ required: true, message: 'Required' }]}><Input /></Form.Item>
           <Form.Item name="name" label="Name" rules={[{ required: true, message: 'Required' }]}><Input /></Form.Item>

@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify';
-import { eq, and, gt } from 'drizzle-orm';
+import { eq, and, gt, or, sql, inArray } from 'drizzle-orm';
 import * as argon2 from 'argon2';
 import { randomBytes } from 'crypto';
-import { db, users, sessions } from '@erp/db';
+import { db, users, sessions, companyLicense, userRoles } from '@erp/db';
 import { loginSchema } from '@erp/shared';
 import { config } from '../config.js';
 
@@ -25,11 +25,20 @@ export default async function authRoutes(app: FastifyInstance) {
     }
 
     const { email, password } = body.data;
+    const identifier = email.trim().toLowerCase();
+
+    // Check if the identifier is a UUID (User ID)
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const isUuid = uuidRegex.test(identifier);
 
     const [user] = await db
       .select()
       .from(users)
-      .where(eq(users.email, email.toLowerCase().trim()))
+      .where(
+        isUuid 
+          ? eq(users.id, identifier) 
+          : or(eq(users.email, identifier), eq(sql`LOWER(${users.fullName})`, identifier))
+      )
       .limit(1);
 
     // Constant-time response — don't leak whether email exists
@@ -43,6 +52,59 @@ export default async function authRoutes(app: FastifyInstance) {
     if (!passwordMatch) {
       return reply.code(401).send({ error: 'Invalid email or password' });
     }
+
+    // ── Concurrent-session (seat) licence check ───────────────────────────
+    // If the company has a max_users limit, check how many DISTINCT users
+    // currently have at least one valid (non-expired) session.
+    // This user's own existing sessions don't count as an extra seat.
+    const now = new Date();
+
+    // Find all companies this user belongs to
+    const userCompanies = await db
+      .select({ companyId: userRoles.companyId })
+      .from(userRoles)
+      .where(eq(userRoles.userId, user.id));
+
+    for (const { companyId } of userCompanies) {
+      const [lic] = await db
+        .select({ maxUsers: companyLicense.maxUsers })
+        .from(companyLicense)
+        .where(eq(companyLicense.companyId, companyId))
+        .limit(1);
+
+      if (!lic || lic.maxUsers === -1) continue; // unlimited
+
+      // Count distinct OTHER users who have active sessions in this company
+      const companyUserIds = await db
+        .selectDistinct({ userId: userRoles.userId })
+        .from(userRoles)
+        .where(eq(userRoles.companyId, companyId));
+
+      const otherUserIds = companyUserIds
+        .map((r) => r.userId)
+        .filter((id) => id !== user.id);
+
+      if (otherUserIds.length === 0) continue;
+
+      const [{ activeCount }] = await db
+        .select({ activeCount: sql<number>`count(distinct ${sessions.userId})::int` })
+        .from(sessions)
+        .where(
+          and(
+            inArray(sessions.userId, otherUserIds),
+            gt(sessions.expiresAt, now)
+          )
+        );
+
+      // Seat is available if: activeOthers + 1 (this user) <= maxUsers
+      if (activeCount + 1 > lic.maxUsers) {
+        return reply.code(403).send({
+          error: 'concurrent_limit_reached',
+          detail: 'All licensed seats are currently in use. Please ask another user to log out first.',
+        });
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────────
 
     // Create session
     const refreshToken = randomBytes(64).toString('hex');

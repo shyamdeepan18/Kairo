@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import { Table, Button, Drawer, Form, DatePicker, Input, Select, Typography, Descriptions, message } from 'antd';
 import dayjs from 'dayjs';
 import { PlusOutlined, EyeOutlined } from '@ant-design/icons';
@@ -15,7 +17,12 @@ import {
 
 const { Title, Text } = Typography;
 
+let lineSeq = 1;
+
 export function SalesOrdersPage() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { confirmClose } = useUnsavedChanges();
   const { company, plant } = usePlantStore();
   const { cardStyle } = useCardStyle();
   const [form] = Form.useForm();
@@ -29,6 +36,9 @@ export function SalesOrdersPage() {
   const [saving, setSaving] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
   const [viewing, setViewing] = useState<any | null>(null);
+  
+  // Track quotation ID if we are creating from a quote
+  const [sourceQuotationId, setSourceQuotationId] = useState<string | undefined>();
 
   const custName = (id?: string) => customers.find((c) => c.id === id)?.name ?? '—';
   const gstBpOf = (id?: string) => taxCodes.find((t) => t.id === id)?.gstRateBp ?? 0;
@@ -39,7 +49,9 @@ export function SalesOrdersPage() {
     salesApi.orders.list(company.id, statusFilter ? { status: statusFilter } : undefined)
       .then((r) => setRows(r.data)).catch((e) => message.error(apiErr(e))).finally(() => setLoading(false));
   }, [company?.id, statusFilter]);
+  
   useEffect(() => { load(); }, [load]);
+  
   useEffect(() => {
     if (!company?.id) return;
     salesApi.customers.list(company.id).then((r) => setCustomers(r.data)).catch(() => {});
@@ -47,9 +59,32 @@ export function SalesOrdersPage() {
     settingsApi.listTaxCodes(company.id).then(setTaxCodes).catch(() => {});
   }, [company?.id]);
 
+  useEffect(() => {
+    if (location.state?.createSoFromQuote && location.state?.customerId) {
+      const { createSoFromQuote, customerId, remarks } = location.state;
+      const mappedLines = createSoFromQuote.lines.map((l: any) => ({
+        key: lineSeq++,
+        itemId: l.itemId,
+        description: l.description,
+        quantity: Number(l.quantity) - Number(l.orderedQty || 0),
+        uom: l.uom,
+        rateRupees: (l.ratePaise || 0) / 100,
+        discountPercent: Number(l.discountPercent) || 0,
+        taxCodeId: l.taxCodeId,
+        quotationLineId: l.id
+      }));
+      setLines(mappedLines);
+      setSourceQuotationId(createSoFromQuote.id);
+      form.resetFields();
+      form.setFieldsValue({ customerId, postingDate: dayjs(), remarks });
+      setDrawer(true);
+      navigate('/sales/orders', { replace: true, state: {} });
+    }
+  }, [location.state, navigate, form]);
+
   const refItems: RefItem[] = items.map((i) => ({ id: i.id, itemName: i.itemName, itemCode: i.itemCode, primaryUom: i.primaryUom, defaultTaxCodeId: i.defaultTaxCodeId }));
 
-  const openNew = () => { form.resetFields(); form.setFieldsValue({ postingDate: dayjs() }); setLines([newDraftLine()]); setDrawer(true); };
+  const openNew = () => { form.resetFields(); form.setFieldsValue({ postingDate: dayjs() }); setLines([newDraftLine()]); setSourceQuotationId(undefined); setDrawer(true); };
   const save = async (v: any) => {
     if (!company?.id || !plant?.id) { message.error('Select company & plant'); return; }
     const valid = lines.filter((l) => l.itemId && l.quantity > 0);
@@ -60,6 +95,7 @@ export function SalesOrdersPage() {
       postingDate: v.postingDate?.format?.('YYYY-MM-DD'),
       customerId: v.customerId, expectedDeliveryDate: v.expectedDeliveryDate?.format?.('YYYY-MM-DD'),
       customerPoNumber: v.customerPoNumber, remarks: v.remarks,
+      quotationId: sourceQuotationId,
       lines: valid.map((l) => pricedLineBody(l, gstBpOf)),
     };
     try { await salesApi.orders.create(body); message.success('Sales order created.'); setDrawer(false); load(); }
@@ -101,7 +137,7 @@ export function SalesOrdersPage() {
       <div style={{ marginBottom: 16 }}><Select allowClear placeholder="All statuses" value={statusFilter} onChange={setStatusFilter} style={{ minWidth: 180 }} options={STATUS_OPTIONS} /></div>
       <div style={cardStyle}><Table dataSource={rows} columns={columns} rowKey="id" loading={loading} pagination={{ pageSize: 20, hideOnSinglePage: true }} locale={{ emptyText: 'No sales orders yet.' }} /></div>
 
-      <Drawer title="New Sales Order" open={drawer} onClose={() => setDrawer(false)} width={920} extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>Create</Button>}>
+      <Drawer title="New Sales Order" open={drawer} onClose={async () => { if (await confirmClose(form)) { form.resetFields(); setDrawer(false); } }} width={920} extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>Create</Button>}>
         <Form form={form} layout="vertical" onFinish={save} requiredMark={false}>
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
             <Form.Item name="customerId" label="Customer" rules={[{ required: true, message: 'Required' }]} style={{ minWidth: 280, flex: 1 }}>

@@ -10,6 +10,7 @@ import inventoryPlugin from './plugins/inventory.js';
 import salesPlugin from './plugins/sales.js';
 import manufacturingPlugin from './plugins/manufacturing.js';
 import governancePlugin from './plugins/governance.js';
+import auditPlugin from './plugins/audit.js';
 import authRoutes from './routes/auth.js';
 import companyRoutes from './routes/companies.js';
 import settingsRoutes from './routes/settings.js';
@@ -46,6 +47,9 @@ async function start() {
 
   // Auth plugin: JWT + cookie support + authenticate decorator
   await app.register(authPlugin);
+
+  // Global Audit logging plugin for mutations
+  await app.register(auditPlugin);
 
   // PermissionService — available on every request via app.permissionService
   app.decorate('permissionService', new PermissionService(app.redis));

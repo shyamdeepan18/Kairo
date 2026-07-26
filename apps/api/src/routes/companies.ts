@@ -8,7 +8,8 @@
 
 import type { FastifyInstance } from 'fastify';
 import { db } from '@erp/db';
-import { companies, plants, userRoles, documentNumberSeries, roles } from '@erp/db';
+import { companies, plants, userRoles, documentNumberSeries, roles, companyLicense } from '@erp/db';
+import { sql } from 'drizzle-orm';
 import { seedCoaForCompany } from '@erp/db/seeds/coa';
 import { eq, inArray, and } from 'drizzle-orm';
 
@@ -42,8 +43,11 @@ export default async function companyRoutes(app: FastifyInstance) {
           legalName: companies.legalName,
           gstin: companies.gstin,
           baseCurrency: companies.baseCurrency,
+          hasLicense: sql<boolean>`${companyLicense.id} IS NOT NULL`,
+          licenseValidTo: companyLicense.validTo,
         })
-        .from(companies);
+        .from(companies)
+        .leftJoin(companyLicense, eq(companyLicense.companyId, companies.id));
 
       const list = isSystemAdmin ? await query : await query.where(inArray(companies.id, companyIds));
 

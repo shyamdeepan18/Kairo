@@ -166,7 +166,8 @@ function simpleTransition(
 
     if (cfg.to === 'approved') {
       const uid = userId(request);
-      if (!app.permissionService.validateMakerChecker(uid, row.createdBy, row.submittedBy)) {
+    const bypassSod = await app.permissionService.check(uid, 'system.bypass_sod', cid);
+      if (!app.permissionService.validateMakerChecker(uid, row.createdBy, row.submittedBy, bypassSod)) {
         return reply.code(403).send({ error: 'Segregation of duties violation: Document maker/submitter cannot approve.' });
       }
     }
@@ -372,13 +373,14 @@ function registerOrders(app: FastifyInstance) {
     const remarks = transitionSchema.safeParse(request.body ?? {}).data?.remarks;
     const cid = companyId(request);
     const uid = userId(request);
+    const bypassSod = await app.permissionService.check(uid, 'system.bypass_sod', cid);
 
     const [so] = await db.select().from(salesOrders).where(eq(salesOrders.id, id)).limit(1);
     if (!so) return reply.code(404).send({ error: 'Sales Order not found' });
     if (so.status !== 'submitted') return reply.code(409).send({ error: `SO must be submitted (is '${so.status}')` });
 
     // Segregation of Duties
-    if (!app.permissionService.validateMakerChecker(uid, so.createdBy, so.submittedBy)) {
+    if (!app.permissionService.validateMakerChecker(uid, so.createdBy, so.submittedBy, bypassSod)) {
       return reply.code(403).send({ error: 'Segregation of duties violation: Maker/submitter cannot approve.' });
     }
 
@@ -491,12 +493,13 @@ function registerDeliveries(app: FastifyInstance) {
     const remarks = transitionSchema.safeParse(request.body ?? {}).data?.remarks;
     const cid = companyId(request);
     const uid = userId(request);
+    const bypassSod = await app.permissionService.check(uid, 'system.bypass_sod', cid);
 
     const [dn] = await db.select().from(deliveryNotes).where(eq(deliveryNotes.id, id)).limit(1);
     if (!dn) return reply.code(404).send({ error: 'Delivery not found' });
     if (dn.status !== 'submitted') return reply.code(409).send({ error: `Delivery must be submitted (is '${dn.status}')` });
 
-    if (!app.permissionService.validateMakerChecker(uid, dn.createdBy, dn.submittedBy)) {
+    if (!app.permissionService.validateMakerChecker(uid, dn.createdBy, dn.submittedBy, bypassSod)) {
       return reply.code(403).send({ error: 'Segregation of duties violation: Document maker/submitter cannot approve.' });
     }
 
@@ -626,12 +629,13 @@ function registerInvoices(app: FastifyInstance) {
     const remarks = transitionSchema.safeParse(request.body ?? {}).data?.remarks;
     const cid = companyId(request);
     const uid = userId(request);
+    const bypassSod = await app.permissionService.check(uid, 'system.bypass_sod', cid);
 
     const [inv] = await db.select().from(salesInvoices).where(eq(salesInvoices.id, id)).limit(1);
     if (!inv) return reply.code(404).send({ error: 'Invoice not found' });
     if (inv.status !== 'submitted') return reply.code(409).send({ error: `Invoice must be submitted (is '${inv.status}')` });
 
-    if (!app.permissionService.validateMakerChecker(uid, inv.createdBy, inv.submittedBy)) {
+    if (!app.permissionService.validateMakerChecker(uid, inv.createdBy, inv.submittedBy, bypassSod)) {
       return reply.code(403).send({ error: 'Segregation of duties violation: Document maker/submitter cannot approve.' });
     }
 
@@ -739,12 +743,13 @@ function registerReceipts(app: FastifyInstance) {
     const remarks = transitionSchema.safeParse(request.body ?? {}).data?.remarks;
     const cid = companyId(request);
     const uid = userId(request);
+    const bypassSod = await app.permissionService.check(uid, 'system.bypass_sod', cid);
 
     const [rc] = await db.select().from(salesReceipts).where(eq(salesReceipts.id, id)).limit(1);
     if (!rc) return reply.code(404).send({ error: 'Receipt not found' });
     if (rc.status !== 'submitted') return reply.code(409).send({ error: `Receipt must be submitted (is '${rc.status}')` });
 
-    if (!app.permissionService.validateMakerChecker(uid, rc.createdBy, rc.submittedBy)) {
+    if (!app.permissionService.validateMakerChecker(uid, rc.createdBy, rc.submittedBy, bypassSod)) {
       return reply.code(403).send({ error: 'Segregation of duties violation: Document maker/submitter cannot approve.' });
     }
 

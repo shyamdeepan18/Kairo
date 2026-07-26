@@ -5,12 +5,13 @@
 
 import { useMemo } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { usePermissionStore } from '../../store/permission';
 import { Menu, Typography, theme as antTheme } from 'antd';
 import {
   BankOutlined, TeamOutlined, SafetyOutlined,
   AccountBookOutlined, TagsOutlined, NodeIndexOutlined,
   FieldTimeOutlined, PrinterOutlined, ApiOutlined,
-  EnvironmentOutlined,
+  EnvironmentOutlined, SafetyCertificateOutlined
 } from '@ant-design/icons';
 
 const { Text } = Typography;
@@ -20,6 +21,7 @@ const SETTINGS_NAV = [
   { key: '/settings/plants',          label: 'Plants & Warehouses', icon: <EnvironmentOutlined /> },
   { key: '/settings/users',           label: 'Users',               icon: <TeamOutlined /> },
   { key: '/settings/roles',           label: 'Roles & Permissions', icon: <SafetyOutlined /> },
+  { key: '/settings/approval-limits', label: 'Approval Limits',     icon: <SafetyCertificateOutlined /> },
   { key: '/settings/number-series',   label: 'Number Series',       icon: <FieldTimeOutlined /> },
   { key: '/settings/coa',             label: 'Chart of Accounts',   icon: <AccountBookOutlined /> },
   { key: '/settings/tax-codes',       label: 'Tax Codes',           icon: <TagsOutlined /> },
@@ -32,11 +34,21 @@ export function SettingsLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const { token: dt } = antTheme.useToken();
+  const hasPermission = usePermissionStore((s) => s.hasPermission);
+
+  const navItems = useMemo(() => {
+    return SETTINGS_NAV.filter((nav) => {
+      if (nav.key === '/settings/approval-limits') {
+        return hasPermission('settings.approvalworkflow.manage');
+      }
+      return true; // We can add more permission checks here in the future
+    });
+  }, [hasPermission]);
 
   const selectedKey = useMemo(() => {
-    const match = SETTINGS_NAV.find((n) => location.pathname.startsWith(n.key));
+    const match = navItems.find((n) => location.pathname.startsWith(n.key));
     return match?.key ?? '/settings/company';
-  }, [location.pathname]);
+  }, [location.pathname, navItems]);
 
   return (
     <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
@@ -66,7 +78,7 @@ export function SettingsLayout() {
         <Menu
           mode="inline"
           selectedKeys={[selectedKey]}
-          items={SETTINGS_NAV}
+          items={navItems}
           onClick={({ key }) => navigate(key)}
           style={{ border: 0, background: 'transparent' }}
         />

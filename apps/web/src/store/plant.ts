@@ -7,6 +7,8 @@ export interface ErpCompany {
   legalName: string | null;
   gstin: string | null;
   baseCurrency: string;
+  hasLicense: boolean;
+  licenseValidTo: string | null;
 }
 
 export interface ErpPlant {

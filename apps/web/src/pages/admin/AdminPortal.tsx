@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import {
   Layout, Menu, Table, Button, Drawer, Form, Input, Select, Tag, Avatar,
   Typography, Space, Popconfirm, message, Alert, Badge, Tooltip, Divider,
@@ -8,24 +9,26 @@ import {
   BankOutlined, ApartmentOutlined, UserOutlined, SafetyOutlined,
   PlusOutlined, CheckCircleOutlined, StopOutlined,
   ArrowLeftOutlined, CrownOutlined, TeamOutlined,
-  LogoutOutlined, KeyOutlined, WarningOutlined, EditOutlined, DeleteOutlined, LockOutlined, BulbOutlined, BulbFilled,
+  LogoutOutlined, KeyOutlined, WarningOutlined, EditOutlined, DeleteOutlined, LockOutlined, BulbOutlined, BulbFilled, DashboardOutlined,
 } from '@ant-design/icons';
 import {
   adminApi,
   type AdminCompany, type AdminPlant, type AdminUser,
-  type AdminRole, type AdminLicense, type AdminLicenseInfo, type AdminPermission,
+  type AdminRole, type AdminLicense, type AdminLicenseInfo, type AdminPermission, type AdminDiagnosticsHealth, type AdminAuditLog,
 } from '../../api/admin';
 import { useAuthStore } from '../../store/auth';
 import { useThemeStore } from '../../store/theme';
 import dayjs from 'dayjs';
 import { ChangePasswordModal } from '../../components/ChangePasswordModal';
+import { DiagnosticsPanel } from './DiagnosticsPanel';
 
 const { Sider, Content, Header } = Layout;
 const { Title, Text } = Typography;
 
-type Section = 'companies' | 'plants' | 'users' | 'roles' | 'license';
+type Section = 'companies' | 'plants' | 'users' | 'roles' | 'license' | 'diagnostics';
 
 export function AdminPortalPage() {
+  const { confirmClose } = useUnsavedChanges();
   const { user, logout } = useAuthStore();
   const { isDark, toggle } = useThemeStore();
   const [section, setSection] = useState<Section>('companies');
@@ -231,6 +234,17 @@ export function AdminPortalPage() {
     } catch { message.error('Failed to update user status'); }
   };
 
+  const handleDeleteUser = async (userId: string) => {
+    if (!selectedCompany) return;
+    try {
+      await adminApi.deleteUser(userId);
+      message.success('User deleted successfully');
+      loadUsers(selectedCompany.id);
+    } catch (e: any) {
+      message.error(e?.response?.data?.error ?? 'Failed to delete user');
+    }
+  };
+
   const handleResetPassword = async (userId: string) => {
     try {
       const res = await adminApi.resetUserPassword(userId);
@@ -334,7 +348,7 @@ export function AdminPortalPage() {
     }
   };
 
-  const handleCreateCustomRole = async (values: { name: string; description?: string }) => {
+  const handleCreateCustomRole = async (values: { name: string; description?: string; copyFromRoleIds?: string[] }) => {
     if (!selectedCompany) return;
     try {
       const res = await adminApi.createRole(selectedCompany.id, values);
@@ -452,6 +466,7 @@ export function AdminPortalPage() {
           <div>
             <Text strong style={{ display: 'block', }}>{r.fullName}</Text>
             <Text style={{ fontSize: 12, color: 'var(--ant-color-text-secondary)', }}>{r.email}</Text>
+            <Text copyable style={{ fontSize: 10, display: 'block', color: 'var(--ant-color-text-tertiary)' }}>ID: {r.id}</Text>
           </div>
         </Space>
       ),
@@ -514,14 +529,27 @@ export function AdminPortalPage() {
     {
       title: 'Actions', key: 'actions', width: 150,
       render: (_: any, r: AdminUser) => (
-        <Popconfirm
-          title="Reset Password?"
-          description={`Generate a new temporary password for ${r.fullName}?`}
-          onConfirm={() => handleResetPassword(r.id)}
-          okText="Reset Password"
-        >
-          <Button size="small" icon={<KeyOutlined />}>Reset Password</Button>
-        </Popconfirm>
+        <Space>
+          <Popconfirm
+            title="Reset Password?"
+            description={`Generate a new temporary password for ${r.fullName}?`}
+            onConfirm={() => handleResetPassword(r.id)}
+            okText="Reset Password"
+          >
+            <Button size="small" icon={<KeyOutlined />}>Reset Password</Button>
+          </Popconfirm>
+          {!r.isActive && !r.isSystemAdmin && (
+            <Popconfirm
+              title="Delete User?"
+              description={`Are you sure you want to permanently delete ${r.fullName}?`}
+              onConfirm={() => handleDeleteUser(r.id)}
+              okText="Delete"
+              okButtonProps={{ danger: true }}
+            >
+              <Button size="small" danger icon={<DeleteOutlined />}>Delete</Button>
+            </Popconfirm>
+          )}
+        </Space>
       ),
     },
   ];
@@ -580,6 +608,7 @@ export function AdminPortalPage() {
             style={{ background: 'transparent', border: 'none' }} 
             items={[
               { key: 'companies', icon: <BankOutlined />, label: 'Companies', onClick: () => { setSection('companies'); setSelectedCompany(null); } },
+              { key: 'diagnostics', icon: <DashboardOutlined />, label: 'Diagnostics', onClick: () => { setSection('diagnostics'); setSelectedCompany(null); } },
               ...(selectedCompany ? [
                 { key: 'plants', icon: <ApartmentOutlined />, label: 'Plants', onClick: () => selectCompany(selectedCompany, 'plants') },
                 { key: 'users', icon: <TeamOutlined />, label: 'Users', onClick: () => selectCompany(selectedCompany, 'users') },
@@ -610,6 +639,9 @@ export function AdminPortalPage() {
 
         {/* Main Content */}
         <Content style={{ padding: 24, minHeight: 'calc(100vh - 60px)' }}>
+
+          {/* ── Diagnostics ───────────────────────────────────────────────── */}
+          {section === 'diagnostics' && <DiagnosticsPanel />}
 
           {/* ── Companies ─────────────────────────────────────────────────── */}
           {section === 'companies' && (
@@ -886,7 +918,7 @@ export function AdminPortalPage() {
       </Layout>
 
       {/* ── Company Drawer ───────────────────────────────────────────────── */}
-      <Drawer title="Create New Company" open={companyDrawer} onClose={() => setCompanyDrawer(false)} width={440}
+      <Drawer title="Create New Company" open={companyDrawer} onClose={async () => { if (await confirmClose(companyForm)) { companyForm.resetFields(); setCompanyDrawer(false); } }} width={440}
         extra={<Button type="primary" onClick={() => companyForm.submit()}>Create Company</Button>}>
         <Form form={companyForm} layout="vertical" onFinish={handleSaveCompany} requiredMark={false}>
           <Form.Item name="name" label="Company Name" rules={[{ required: true }]}>
@@ -911,7 +943,7 @@ export function AdminPortalPage() {
             <Col span={12}><Form.Item name="city" label="City"><Input placeholder="Mumbai" /></Form.Item></Col>
             <Col span={12}><Form.Item name="state" label="State"><Input placeholder="Maharashtra" /></Form.Item></Col>
           </Row>
-          <Form.Item name="email" label="Contact Email" rules={[{ type: 'email' }]}>
+          <Form.Item name="email" label="Contact Email or User ID">
             <Input placeholder="admin@acme.com" />
           </Form.Item>
         </Form>
@@ -921,7 +953,7 @@ export function AdminPortalPage() {
       <Drawer
         title={`${editingPlant ? 'Edit' : 'Add'} Plant — ${selectedCompany?.name}`}
         open={plantDrawer}
-        onClose={() => { setPlantDrawer(false); setEditingPlant(null); plantForm.resetFields(); }}
+        onClose={async () => { if (await confirmClose(plantForm)) { plantForm.resetFields(); setPlantDrawer(false); setEditingPlant(null); } }}
         width={440}
         extra={
           <Button type="primary" onClick={() => plantForm.submit()}>
@@ -949,7 +981,7 @@ export function AdminPortalPage() {
 
       {/* ── User Drawer ──────────────────────────────────────────────────── */}
       <Drawer title={`Add User — ${selectedCompany?.name}`} open={userDrawer}
-        onClose={() => { setUserDrawer(false); setInviteResult(null); }} width={440}
+        onClose={async () => { if (await confirmClose(userForm)) { userForm.resetFields(); setUserDrawer(false); setInviteResult(null); } }} width={440}
         extra={!inviteResult && <Button type="primary" onClick={() => userForm.submit()}>Create User</Button>}>
         {inviteResult ? (
           <div>
@@ -969,16 +1001,30 @@ export function AdminPortalPage() {
             <Form.Item name="fullName" label="Full Name" rules={[{ required: true }]}>
               <Input prefix={<UserOutlined />} placeholder="Anita Sharma" />
             </Form.Item>
-            <Form.Item name="email" label="Email Address" rules={[{ required: true }, { type: 'email' }]}>
+            <Form.Item name="email" label="Email Address or User ID" rules={[{ required: true }]}>
               <Input placeholder="anita@company.com" />
             </Form.Item>
-            <Form.Item name="roleId" label="Assign Role" rules={[{ required: true }]} extra="You can add more roles later">
-              <Select placeholder="Select role"
-                options={roles.map((r) => ({ value: r.id, label: `${r.name}${r.isSystemRole ? ' (System)' : ''}` }))} />
+            <Form.Item name="copyFromUserId" label="Copy Roles from Existing User (optional)">
+              <Select placeholder="Select a user to copy from" allowClear
+                options={users.map((u) => ({ value: u.id, label: u.fullName }))} />
             </Form.Item>
-            <Form.Item name="plantId" label="Restrict to Plant (optional)" extra="Leave empty for all plants">
-              <Select placeholder="All plants" allowClear
-                options={plants.map((p) => ({ value: p.id, label: `${p.name} (${p.code})` }))} />
+
+            <Form.Item noStyle shouldUpdate={(prev, curr) => prev.copyFromUserId !== curr.copyFromUserId}>
+              {({ getFieldValue }) => {
+                const isCopying = !!getFieldValue('copyFromUserId');
+                return (
+                  <>
+                    <Form.Item name="roleId" label="Assign Role" rules={[{ required: !isCopying }]} extra={isCopying ? "Roles will be copied from selected user" : "You can add more roles later"}>
+                      <Select placeholder="Select role" disabled={isCopying}
+                        options={roles.map((r) => ({ value: r.id, label: `${r.name}${r.isSystemRole ? ' (System)' : ''}` }))} />
+                    </Form.Item>
+                    <Form.Item name="plantId" label="Restrict to Plant (optional)" extra="Leave empty for all plants">
+                      <Select placeholder="All plants" allowClear disabled={isCopying}
+                        options={plants.map((p) => ({ value: p.id, label: `${p.name} (${p.code})` }))} />
+                    </Form.Item>
+                  </>
+                );
+              }}
             </Form.Item>
           </Form>
         )}
@@ -1003,7 +1049,7 @@ export function AdminPortalPage() {
 
       {/* ── License Drawer ───────────────────────────────────────────────── */}
       <Drawer title={`${licenseInfo?.license ? 'Update' : 'Install'} License — ${selectedCompany?.name}`}
-        open={licenseDrawer} onClose={() => { setLicenseDrawer(false); licenseForm.resetFields(); }} width={440}
+        open={licenseDrawer} onClose={async () => { if (await confirmClose(licenseForm)) { licenseForm.resetFields(); setLicenseDrawer(false); } }} width={440}
         extra={<Button type="primary" loading={savingLicense} onClick={() => licenseForm.submit()}>Save License</Button>}>
         <Form form={licenseForm} layout="vertical" onFinish={handleSaveLicense} requiredMark={false}>
           <Form.Item name="edition" label="Edition" rules={[{ required: true }]} initialValue="standard">
@@ -1023,7 +1069,7 @@ export function AdminPortalPage() {
           </Form.Item>
           <Row gutter={12}>
             <Col span={12}>
-              <Form.Item name="validFrom" label="Valid From">
+              <Form.Item name="validFrom" label="Valid From" rules={[{ required: true, message: 'Start date is required' }]}>
                 <DatePicker style={{ width: '100%' }} format="DD MMM YYYY" />
               </Form.Item>
             </Col>
@@ -1171,6 +1217,14 @@ export function AdminPortalPage() {
           </Form.Item>
           <Form.Item name="description" label="Description (optional)">
             <Input.TextArea placeholder="Describe the responsibilities granted by this role..." rows={3} />
+          </Form.Item>
+          <Form.Item name="copyFromRoleIds" label="Copy Permissions from Roles (optional)" extra="Select multiple roles to combine their permissions into this new role.">
+            <Select
+              mode="multiple"
+              placeholder="Select roles to clone permissions from"
+              allowClear
+              options={roles.map((r) => ({ value: r.id, label: `${r.name}${r.isSystemRole ? ' (System)' : ''}` }))}
+            />
           </Form.Item>
         </Form>
       </Modal>

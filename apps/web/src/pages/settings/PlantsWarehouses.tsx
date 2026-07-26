@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import {
   Table, Button, Drawer, Form, Input, Select, Switch, Typography, Tag,
   message, Row, Col, theme as antTheme,
@@ -17,6 +18,7 @@ const { Title, Text } = Typography;
 const STATE_CODES = Array.from({ length: 38 }, (_, i) => String(i + 1).padStart(2, '0'));
 
 export function PlantsWarehousesPage() {
+  const { confirmClose } = useUnsavedChanges();
   const { company } = usePlantStore();
   const { token: dt } = antTheme.useToken();
   const [plantForm] = Form.useForm();
@@ -261,7 +263,7 @@ export function PlantsWarehousesPage() {
       <Drawer
         title={editingPlant ? 'Edit Plant' : 'Add Plant'}
         open={plantDrawer}
-        onClose={() => setPlantDrawer(false)}
+        onClose={async () => { if (await confirmClose(plantForm)) { plantForm.resetFields(); setPlantDrawer(false); } }}
         width={460}
         extra={<Button type="primary" loading={saving} onClick={() => plantForm.submit()}>Save</Button>}
       >
@@ -307,7 +309,7 @@ export function PlantsWarehousesPage() {
       <Drawer
         title={editingWh ? 'Edit Warehouse' : 'Add Warehouse'}
         open={whDrawer}
-        onClose={() => setWhDrawer(false)}
+        onClose={async () => { if (await confirmClose(whForm)) { whForm.resetFields(); setWhDrawer(false); } }}
         width={420}
         extra={<Button type="primary" loading={saving} onClick={() => whForm.submit()}>Save</Button>}
       >

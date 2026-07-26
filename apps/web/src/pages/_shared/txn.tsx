@@ -4,7 +4,7 @@
  * lifecycle action buttons, money helpers, and a themed card style.
  */
 import {
-  Table, Button, Select, InputNumber, Input, Typography, Space, Popconfirm, theme as antTheme,
+  Table, Button, Select, InputNumber, Input, Typography, Space, Popconfirm, Tooltip, theme as antTheme,
 } from 'antd';
 import {
   PlusOutlined, DeleteOutlined, SendOutlined, CheckOutlined, StopOutlined, CloseOutlined,
@@ -24,6 +24,8 @@ export interface DraftLine {
   taxCodeId?: string;
   poLineId?: string;
   grnLineId?: string;
+  quotationLineId?: string;
+  soLineId?: string;
 }
 
 let seq = 1;
@@ -54,18 +56,27 @@ export const STATUS_OPTIONS = [
 ];
 export const apiErr = (e: any): string => e?.response?.data?.error ?? e?.response?.data?.detail ?? 'Request failed';
 
-export function LifecycleButtons({ status, onSubmit, onApprove, onReject, onCancel }: {
+export function LifecycleButtons({ status, onSubmit, onApprove, onReject, onCancel, disableApprove, disableApproveReason }: {
   status: string; onSubmit?: () => void; onApprove?: () => void; onReject?: () => void; onCancel?: () => void;
+  disableApprove?: boolean; disableApproveReason?: string;
 }) {
+  const approveBtn = <Button type="text" size="small" icon={<CheckOutlined />} disabled={disableApprove}>Approve</Button>;
+
   return (
     <Space size={4}>
       {status === 'draft' && onSubmit && (
         <Button type="text" size="small" icon={<SendOutlined />} onClick={onSubmit}>Submit</Button>
       )}
       {status === 'submitted' && onApprove && (
-        <Popconfirm title="Approve this document?" onConfirm={onApprove}>
-          <Button type="text" size="small" icon={<CheckOutlined />}>Approve</Button>
-        </Popconfirm>
+        disableApprove ? (
+          <Tooltip title={disableApproveReason || 'You cannot approve this'}>
+            {approveBtn}
+          </Tooltip>
+        ) : (
+          <Popconfirm title="Approve this document?" onConfirm={onApprove}>
+            {approveBtn}
+          </Popconfirm>
+        )
       )}
       {status === 'submitted' && onReject && (
         <Popconfirm title="Reject this document?" onConfirm={onReject}>
@@ -132,6 +143,6 @@ export function pricedLineBody(l: DraftLine, gstBpOf: (id?: string) => number) {
     itemId: l.itemId, description: l.description || undefined, quantity: l.quantity, uom: l.uom ?? 'NOS',
     ratePaise, discountPercent: l.discountPercent || 0, taxCodeId: l.taxCodeId || undefined,
     cgstAmountPaise: c.cgstAmountPaise, sgstAmountPaise: c.sgstAmountPaise,
-    poLineId: l.poLineId || undefined, grnLineId: l.grnLineId || undefined,
+    poLineId: l.poLineId || undefined, grnLineId: l.grnLineId || undefined, quotationLineId: l.quotationLineId || undefined,
   };
 }

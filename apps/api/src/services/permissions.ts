@@ -105,7 +105,8 @@ export class PermissionService {
    * Segregation of Duties (Maker ≠ Checker):
    * Ensures the approving user is not the same user who created or submitted the document.
    */
-  validateMakerChecker(approverUserId: string, createdBy?: string | null, submittedBy?: string | null): boolean {
+  validateMakerChecker(approverUserId: string, createdBy?: string | null, submittedBy?: string | null, bypassSod?: boolean): boolean {
+    if (bypassSod) return true;
     if (createdBy && approverUserId === createdBy) return false;
     if (submittedBy && approverUserId === submittedBy) return false;
     return true;

@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import {
   Form, Input, Button, Tabs, Typography, Spin, Alert, message, Select,
   Row, Col, Divider, theme as antTheme,
@@ -44,6 +45,8 @@ const INDIAN_STATES = [
 ];
 
 export function CompanySettingsPage() {
+  const { confirmClose } = useUnsavedChanges();
+  const activeTabRef = useRef<string>('general');
   const { company } = usePlantStore();
   const { token: dt } = antTheme.useToken();
   const [generalForm] = Form.useForm();
@@ -103,6 +106,20 @@ export function CompanySettingsPage() {
 
       <Tabs
         defaultActiveKey="general"
+        onChange={async (key) => {
+          const formMap: Record<string, typeof generalForm> = {
+            general: generalForm, gst: gstForm, financial: financialForm,
+          };
+          const currentForm = formMap[activeTabRef.current];
+          if (currentForm && !(await confirmClose(currentForm))) return;
+          if (currentForm) currentForm.resetFields();
+          if (detail) {
+            generalForm.setFieldsValue(detail);
+            gstForm.setFieldsValue(detail);
+            financialForm.setFieldsValue(detail);
+          }
+          activeTabRef.current = key;
+        }}
         items={[
           {
             key: 'general',

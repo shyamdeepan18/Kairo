@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import dayjs from 'dayjs';
 import {
   Table, Button, Drawer, Form, DatePicker, Input, Select, InputNumber,
@@ -25,6 +26,7 @@ let allocSeq = 1;
 const newAllocation = (): DraftAllocation => ({ key: allocSeq++, amountRupees: 0 });
 
 export function PurchasePaymentsPage() {
+  const { confirmClose } = useUnsavedChanges();
   const { company, plant } = usePlantStore();
   const { cardStyle } = useCardStyle();
   const [form] = Form.useForm();
@@ -119,7 +121,7 @@ export function PurchasePaymentsPage() {
       </div>
       <div style={{ marginBottom: 16 }}><Select allowClear placeholder="All statuses" value={statusFilter} onChange={setStatusFilter} style={{ minWidth: 180 }} options={STATUS_OPTIONS} /></div>
       <div style={cardStyle}><Table dataSource={rows} columns={columns} rowKey="id" loading={loading} pagination={{ pageSize: 20, hideOnSinglePage: true }} locale={{ emptyText: 'No payments yet.' }} /></div>
-      <Drawer title="New Purchase Payment" open={drawer} onClose={() => setDrawer(false)} width={740} extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>Create</Button>}>
+      <Drawer title="New Purchase Payment" open={drawer} onClose={async () => { if (await confirmClose(form)) { form.resetFields(); setDrawer(false); } }} width={740} extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>Create</Button>}>
         <Form form={form} layout="vertical" onFinish={save} requiredMark={false}>
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
             <Form.Item name="supplierId" label="Supplier" rules={[{ required: true, message: 'Required' }]} style={{ minWidth: 240, flex: 1 }}>

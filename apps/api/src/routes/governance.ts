@@ -170,7 +170,7 @@ export default async function governanceRoutes(app: FastifyInstance) {
         app.approvalEngine.act(tx, id, userId(request), d.action, d.remarks));
       return reply.send({ ok: true, ...result });
     } catch (err) {
-      return reply.code(409).send({ error: 'Approval action failed', detail: (err as Error).message });
+      return reply.code(409).send({ error: `Approval action failed: ${(err as Error).message}`, detail: (err as Error).message });
     }
   });
 }

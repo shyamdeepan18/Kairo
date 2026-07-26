@@ -14,6 +14,7 @@ import { SettingsLayout } from './pages/settings/index';
 import { CompanySettingsPage } from './pages/settings/CompanySettings';
 import { UsersPage } from './pages/settings/Users';
 import { RolesPage } from './pages/settings/Roles';
+import { ApprovalLimits } from './pages/settings/ApprovalLimits';
 import { ChartOfAccountsPage } from './pages/settings/ChartOfAccounts';
 import { PlantsWarehousesPage } from './pages/settings/PlantsWarehouses';
 import { NumberSeriesPage } from './pages/settings/NumberSeries';
@@ -73,6 +74,7 @@ export function App() {
                     <Route path="plants" element={<PlantsWarehousesPage />} />
                     <Route path="users" element={<UsersPage />} />
                     <Route path="roles" element={<RolesPage />} />
+                    <Route path="approval-limits" element={<ApprovalLimits />} />
                     <Route path="number-series" element={<NumberSeriesPage />} />
                     <Route path="coa" element={<ChartOfAccountsPage />} />
                     <Route path="tax-codes" element={<TaxCodesPage />} />

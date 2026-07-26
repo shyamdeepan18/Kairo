@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import {
   Button, Drawer, Form, Input, Select, Switch, Typography, Tag, Empty,
   message, Row, Col, Segmented, Popconfirm, Space, theme as antTheme,
@@ -34,6 +35,7 @@ const slugify = (s: string) =>
 const randomId = () => 'cf_' + Math.random().toString(36).slice(2, 10);
 
 export function CustomFieldsPage() {
+  const { confirmClose } = useUnsavedChanges();
   const { company } = usePlantStore();
   const { token: dt } = antTheme.useToken();
   const [form] = Form.useForm();
@@ -190,7 +192,7 @@ export function CustomFieldsPage() {
       <Drawer
         title={editing ? 'Edit Custom Field' : 'Add Custom Field'}
         open={drawer}
-        onClose={() => setDrawer(false)}
+        onClose={async () => { if (await confirmClose(form)) { form.resetFields(); setDrawer(false); } }}
         width={440}
         extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>Save</Button>}
       >

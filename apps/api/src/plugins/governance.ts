@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { ApprovalEngine } from '../services/approval-engine.js';
 import { LicenseService } from '../services/license-service.js';
 import {
-  purchaseRequisitions, purchaseOrders, purchaseInvoices, purchasePayments,
+  purchaseRequisitions, purchaseOrders, goodsReceiptNotes, purchaseInvoices, purchasePayments,
   salesQuotations, salesOrders, salesInvoices, salesReceipts,
   productionFormulas, productionOrders,
 } from '@erp/db';
@@ -21,6 +21,7 @@ async function governancePlugin(app: FastifyInstance) {
 
   approvalEngine.registerDocument('purchase.requisition', purchaseRequisitions);
   approvalEngine.registerDocument('purchase.po', purchaseOrders);
+  approvalEngine.registerDocument('purchase.grn', goodsReceiptNotes);
   approvalEngine.registerDocument('purchase.invoice', purchaseInvoices);
   approvalEngine.registerDocument('purchase.payment', purchasePayments);
   approvalEngine.registerDocument('sales.quotation', salesQuotations);

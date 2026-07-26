@@ -400,15 +400,19 @@ export class StockLedgerService {
     tx: TX,
     m: Pick<StockMovement, 'companyId' | 'plantId' | 'warehouseId' | 'itemId'>
   ): Promise<StockBalance | null> {
-    const rows = await tx.execute(sql`
-      SELECT * FROM stock_balances
-      WHERE company_id  = ${m.companyId}
-        AND plant_id    = ${m.plantId}
-        AND warehouse_id = ${m.warehouseId}
-        AND item_id     = ${m.itemId}
-      FOR UPDATE
-    `);
-    return (rows[0] as StockBalance | undefined) ?? null;
+    const [row] = await tx
+      .select()
+      .from(stockBalances)
+      .where(
+        and(
+          eq(stockBalances.companyId, m.companyId),
+          eq(stockBalances.plantId, m.plantId),
+          eq(stockBalances.warehouseId, m.warehouseId),
+          eq(stockBalances.itemId, m.itemId)
+        )
+      )
+      .for('update');
+    return row ?? null;
   }
 
   private async updateBalance(

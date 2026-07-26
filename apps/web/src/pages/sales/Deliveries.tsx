@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import { Table, Button, Drawer, Form, DatePicker, Select, Typography, message } from 'antd';
 import dayjs from 'dayjs';
 import { PlusOutlined } from '@ant-design/icons';
@@ -15,6 +16,7 @@ import {
 const { Title, Text } = Typography;
 
 export function DeliveriesPage() {
+  const { confirmClose } = useUnsavedChanges();
   const { company, plant } = usePlantStore();
   const { cardStyle } = useCardStyle();
   const [form] = Form.useForm();
@@ -58,7 +60,7 @@ export function DeliveriesPage() {
       companyId: company.id, plantId: plant.id,
       postingDate: v.postingDate?.format?.('YYYY-MM-DD'),
       customerId: v.customerId, soId: v.soId, warehouseId: v.warehouseId,
-      lines: valid.map((l) => ({ itemId: l.itemId, description: l.description, deliveredQty: l.quantity, uom: l.uom ?? 'NOS' })),
+      lines: valid.map((l) => ({ itemId: l.itemId, description: l.description, deliveredQty: l.quantity, uom: l.uom ?? 'NOS', soLineId: (l as any).soLineId || undefined })),
     };
     try { await salesApi.deliveries.create(body); message.success('Delivery created.'); setDrawer(false); load(); }
     catch (e) { message.error(apiErr(e)); } finally { setSaving(false); }
@@ -85,7 +87,7 @@ export function DeliveriesPage() {
       </div>
       <div style={{ marginBottom: 16 }}><Select allowClear placeholder="All statuses" value={statusFilter} onChange={setStatusFilter} style={{ minWidth: 180 }} options={STATUS_OPTIONS} /></div>
       <div style={cardStyle}><Table dataSource={rows} columns={columns} rowKey="id" loading={loading} pagination={{ pageSize: 20, hideOnSinglePage: true }} locale={{ emptyText: 'No deliveries yet.' }} /></div>
-      <Drawer title="New Delivery Note" open={drawer} onClose={() => setDrawer(false)} width={860} extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>Create</Button>}>
+      <Drawer title="New Delivery Note" open={drawer} onClose={async () => { if (await confirmClose(form)) { form.resetFields(); setDrawer(false); } }} width={860} extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>Create</Button>}>
         <Form form={form} layout="vertical" onFinish={save} requiredMark={false}>
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
             <Form.Item name="customerId" label="Customer" rules={[{ required: true, message: 'Required' }]} style={{ minWidth: 240, flex: 1 }}>
@@ -98,7 +100,25 @@ export function DeliveriesPage() {
           </div>
           <div style={{ display: 'flex', gap: 16 }}>
             <Form.Item name="soId" label="Against SO (optional)" style={{ minWidth: 240, flex: 1 }}>
-              <Select allowClear showSearch optionFilterProp="label" options={sos.map((s) => ({ value: s.id, label: s.documentNumber }))} />
+              <Select allowClear showSearch optionFilterProp="label" options={sos.map((s) => ({ value: s.id, label: s.documentNumber }))} onChange={async (val) => {
+                if (!val || !company?.id) { setLines([newDraftLine()]); return; }
+                try {
+                  const fullSo = await salesApi.orders.get(company.id, val);
+                  form.setFieldsValue({ customerId: fullSo.customerId });
+                  const mappedLines = fullSo.lines.map((l: any, i: number) => ({
+                    key: Date.now() + i,
+                    itemId: l.itemId,
+                    description: l.description,
+                    quantity: Number(l.quantity) - Number(l.deliveredQty || 0),
+                    uom: l.uom,
+                    rateRupees: (l.ratePaise || 0) / 100,
+                    soLineId: l.id,
+                  })).filter((l: any) => l.quantity > 0);
+                  setLines(mappedLines.length ? mappedLines : [newDraftLine()]);
+                } catch (e) {
+                  message.error(apiErr(e));
+                }
+              }} />
             </Form.Item>
           </div>
           <LinesEditor lines={lines} onChange={setLines} items={refItems} taxCodes={[]} showTax={false} showDiscount={false} rateLabel="Rate ₹" />

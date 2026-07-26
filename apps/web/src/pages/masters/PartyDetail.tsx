@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Button, Form, Input, Select, Switch, Typography, Tag, Tabs, Table,
@@ -30,6 +31,7 @@ type Kind = 'supplier' | 'customer';
 type Party = Supplier & Customer;
 
 function PartyDetail({ kind }: { kind: Kind }) {
+  const { confirmClose } = useUnsavedChanges();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { company } = usePlantStore();
@@ -266,7 +268,9 @@ function PartyDetail({ kind }: { kind: Kind }) {
 
   return (
     <div>
-      <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate(`/masters/${kind}s`)} style={{ marginBottom: 8, paddingLeft: 0 }}>
+      <Button type="text" icon={<ArrowLeftOutlined />} onClick={async () => {
+        if (await confirmClose(form, { content: 'You have unsaved changes on this page. Leave anyway?' })) navigate(`/masters/${kind}s`);
+      }} style={{ marginBottom: 8, paddingLeft: 0 }}>
         Back to {noun}s
       </Button>
       <div style={{ marginBottom: 20, display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -294,7 +298,7 @@ function PartyDetail({ kind }: { kind: Kind }) {
       <Drawer
         title="Add Address"
         open={addrDrawer}
-        onClose={() => setAddrDrawer(false)}
+        onClose={async () => { if (await confirmClose(addrForm)) { addrForm.resetFields(); setAddrDrawer(false); } }}
         width={440}
         extra={<Button type="primary" loading={addrSaving} onClick={() => addrForm.submit()}>Save</Button>}
       >

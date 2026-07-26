@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import {
   Table, Button, Drawer, Form, Input, Select, Switch,
   Typography, Tag, Avatar, Tooltip, Popconfirm, message,
@@ -13,6 +14,7 @@ import { usePlantStore } from '../../store/plant';
 const { Title, Text } = Typography;
 
 export function UsersPage() {
+  const { confirmClose } = useUnsavedChanges();
   const { company } = usePlantStore();
   const { token: dt } = antTheme.useToken();
   const [form] = Form.useForm();
@@ -171,7 +173,7 @@ export function UsersPage() {
       <Drawer
         title="Invite User"
         open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
+        onClose={async () => { if (await confirmClose(form)) { form.resetFields(); setDrawerOpen(false); setInviteResult(null); } }}
         width={420}
         extra={
           !inviteResult && (

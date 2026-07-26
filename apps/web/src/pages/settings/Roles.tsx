@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import {
   Switch, Button, Typography, Tag, Spin, Alert, message,
   Modal, Form, Input, Empty, Divider, theme as antTheme,
@@ -98,6 +99,7 @@ const PERMISSION_CATALOG: { module: string; items: PermEntry[] }[] = [
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function RolesPage() {
+  const { confirmClose } = useUnsavedChanges();
   const { company } = usePlantStore();
   const { token: dt } = antTheme.useToken();
   const [form] = Form.useForm();
@@ -220,7 +222,10 @@ export function RolesPage() {
             roles.map((role, i) => (
               <div
                 key={role.id}
-                onClick={() => setSelectedRoleId(role.id)}
+                onClick={async () => {
+                  if (isDirty && !(await confirmClose(isDirty, { content: 'You have unsaved permission changes. Switch role anyway?' }))) return;
+                  setSelectedRoleId(role.id);
+                }}
                 style={{
                   padding: '12px 16px',
                   cursor: 'pointer',

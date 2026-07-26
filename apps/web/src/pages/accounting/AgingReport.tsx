@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Table, Typography, Card, Segmented, message } from 'antd';
-import axios from 'axios';
+import { api } from '../../api/client';
 
 const { Title } = Typography;
 
@@ -29,10 +29,8 @@ const AgingReport: React.FC = () => {
   const fetchData = async (reportType: 'AR' | 'AP') => {
     try {
       setLoading(true);
-      const endpoint = reportType === 'AR' ? '/api/reports/ar-aging' : '/api/reports/ap-aging';
-      const res = await axios.get(endpoint, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-      });
+      const endpoint = reportType === 'AR' ? '/reports/ar-aging' : '/reports/ap-aging';
+      const res = await api.get(endpoint);
       setData(res.data);
     } catch (error) {
       console.error(error);

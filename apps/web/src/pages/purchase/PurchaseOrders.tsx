@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import dayjs from 'dayjs';
 import {
   Table, Button, Drawer, Form, Input, Select, DatePicker, InputNumber,
@@ -33,15 +35,17 @@ let lineSeq = 1;
 const newLine = (): DraftLine => ({ key: lineSeq++, quantity: 1, rateRupees: 0, discountPercent: 0 });
 
 export function PurchaseOrdersPage() {
+  const { confirmClose } = useUnsavedChanges();
   const { company, plant } = usePlantStore();
   const { token: dt } = antTheme.useToken();
   const [form] = Form.useForm();
+  const location = useLocation();
+  const navigate = useNavigate();
 
   const [rows, setRows] = useState<PurchaseHeader[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [taxCodes, setTaxCodes] = useState<TaxCode[]>([]);
-  const [reqs, setReqs] = useState<PurchaseHeader[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
 
@@ -70,8 +74,28 @@ export function PurchaseOrdersPage() {
     purchaseApi.suppliers.list(company.id).then((r) => setSuppliers(r.data)).catch(() => {});
     mastersApi.listItems(company.id).then(setItems).catch(() => {});
     settingsApi.listTaxCodes(company.id).then(setTaxCodes).catch(() => {});
-    purchaseApi.requisitions.list(company.id, { status: 'approved' }).then((r) => setReqs(r.data)).catch(() => {});
   }, [company?.id]);
+
+  useEffect(() => {
+    if (location.state?.createPoFromLines && location.state?.supplierId) {
+      const { createPoFromLines, supplierId, remarks } = location.state;
+      const mappedLines = createPoFromLines.map((l: any) => ({
+        key: lineSeq++,
+        itemId: l.itemId,
+        description: l.description,
+        quantity: Number(l.quantity) - Number(l.orderedQty),
+        uom: l.uom,
+        rateRupees: (l.estimatedRatePaise || 0) / 100,
+        discountPercent: 0,
+        requisitionLineId: l.id
+      }));
+      setLines(mappedLines);
+      form.resetFields();
+      form.setFieldsValue({ supplierId, postingDate: dayjs(), remarks });
+      setDrawer(true);
+      navigate('/purchase/orders', { replace: true, state: {} });
+    }
+  }, [location.state, navigate, form]);
 
   // ── Line editing ──────────────────────────────────────────────────────────
   const setLine = (key: number, patch: Partial<DraftLine>) =>
@@ -92,37 +116,41 @@ export function PurchaseOrdersPage() {
     { net: 0, tax: 0, total: 0 }
   );
 
-  const handleRequisitionChange = async (reqId?: string) => {
-    if (!reqId || !company?.id) return;
-    try {
-      const pr = await purchaseApi.requisitions.get(company.id, reqId);
-      if (pr && pr.lines) {
-        const newLines = pr.lines.map((l: any) => {
-          const it = items.find((item) => item.id === l.itemId);
-          return {
-            key: lineSeq++,
-            itemId: l.itemId,
-            description: l.description || undefined,
-            quantity: Number(l.quantity) || 1,
-            uom: l.uom,
-            rateRupees: l.estimatedRatePaise ? Number(l.estimatedRatePaise) / 100 : 0,
-            discountPercent: 0,
-            taxCodeId: it?.defaultTaxCodeId || undefined,
-            requisitionLineId: l.id,
-          };
-        });
-        setLines(newLines.length > 0 ? newLines : [newLine()]);
-      }
-    } catch (e) {
-      message.error(apiErr(e));
-    }
-  };
 
   const openCreate = () => {
     form.resetFields();
     form.setFieldsValue({ postingDate: dayjs() });
     setLines([newLine()]);
     setDrawer(true);
+  };
+
+  const openEdit = async (row: PurchaseHeader) => {
+    if (!company?.id) return;
+    try {
+      const full = await purchaseApi.orders.get(company.id, row.id);
+      form.resetFields();
+      form.setFieldsValue({
+        id: full.id,
+        supplierId: full.supplierId,
+        postingDate: dayjs(full.postingDate),
+        expectedDeliveryDate: full.expectedDeliveryDate ? dayjs(full.expectedDeliveryDate) : undefined,
+        remarks: full.remarks,
+      });
+      setLines(full.lines.map((l: any) => ({
+        key: lineSeq++,
+        itemId: l.itemId,
+        description: l.description,
+        quantity: Number(l.quantity),
+        uom: l.uom,
+        rateRupees: l.ratePaise / 100,
+        discountPercent: Number(l.discountPercent),
+        taxCodeId: l.taxCodeId,
+        requisitionLineId: l.requisitionLineId,
+      })));
+      setDrawer(true);
+    } catch (e) {
+      message.error(apiErr(e));
+    }
   };
 
   const save = async (values: any) => {
@@ -149,8 +177,13 @@ export function PurchaseOrdersPage() {
       }),
     };
     try {
-      await purchaseApi.orders.create(body);
-      message.success('Purchase order created (draft).');
+      if (values.id) {
+        await purchaseApi.orders.update(values.id, body);
+        message.success('Purchase order updated.');
+      } else {
+        await purchaseApi.orders.create(body);
+        message.success('Purchase order created (draft).');
+      }
       setDrawer(false);
       load();
     } catch (e) {
@@ -163,8 +196,12 @@ export function PurchaseOrdersPage() {
   const runAction = async (row: PurchaseHeader, action: 'submit' | 'approve' | 'cancel') => {
     if (!company?.id) return;
     try {
-      await purchaseApi.orders.act(row.id, action, company.id);
-      message.success(`Order ${action}d.`);
+      const res = await purchaseApi.orders.act(row.id, action, company.id);
+      if (action === 'approve' && res?.status === 'submitted') {
+        message.info('Approval recorded. Waiting for the next level of approval.');
+      } else {
+        message.success(`Order ${action === 'submit' ? 'submitted' : action === 'approve' ? 'approved' : action === 'cancel' ? 'cancelled' : 'processed'}.`);
+      }
       load();
     } catch (e) {
       message.error(apiErr(e));
@@ -188,16 +225,30 @@ export function PurchaseOrdersPage() {
     {
       title: '', key: 'actions', align: 'right' as const, width: 220,
       render: (_: unknown, r: PurchaseHeader) => (
-        <Space size={4}>
+        <Space size="middle">
           <Button type="text" size="small" icon={<EyeOutlined />} onClick={() => openView(r)} />
-          {r.status === 'draft' && (
-            <Button type="text" size="small" icon={<SendOutlined />} onClick={() => runAction(r, 'submit')}>Submit</Button>
-          )}
-          {r.status === 'submitted' && (
-            <Popconfirm title="Approve this PO?" onConfirm={() => runAction(r, 'approve')}>
-              <Button type="text" size="small" icon={<CheckOutlined />}>Approve</Button>
-            </Popconfirm>
-          )}
+          {r.status === 'draft' && <Button type="text" size="small" icon={<SendOutlined />} onClick={() => runAction(r, 'submit')}>Submit</Button>}
+          {r.status === 'draft' && <Button type="text" size="small" onClick={() => openEdit(r)}>Edit</Button>}
+          {r.status === 'submitted' && (() => {
+            const hasWorkflow = !!(r as any).approvalInfo;
+            const isEligible = hasWorkflow ? (r as any).approvalInfo.isEligibleApprover : true;
+            const hasApproved = hasWorkflow ? (r as any).approvalInfo.hasApproved : false;
+
+            if (hasWorkflow) {
+              if (hasApproved) {
+                return <Text type="success" style={{ fontStyle: 'italic', fontSize: 12 }}>Approved. Waiting...</Text>;
+              }
+              if (!isEligible) {
+                return <Text type="secondary" style={{ fontStyle: 'italic', fontSize: 12 }}>Pending: {(r as any).approvalInfo.currentApproverName}</Text>;
+              }
+            }
+
+            return (
+              <Popconfirm title="Approve this PO?" onConfirm={() => runAction(r, 'approve')}>
+                <Button type="text" size="small" icon={<CheckOutlined />}>Approve</Button>
+              </Popconfirm>
+            );
+          })()}
           {r.status === 'approved' && (
             <Popconfirm title="Cancel this PO?" onConfirm={() => runAction(r, 'cancel')}>
               <Button type="text" size="small" danger icon={<StopOutlined />}>Cancel</Button>
@@ -249,17 +300,14 @@ export function PurchaseOrdersPage() {
       </div>
 
       {/* Create drawer */}
-      <Drawer title="New Purchase Order" open={drawer} onClose={() => setDrawer(false)} width={920}
-        extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>Create</Button>}>
+      <Drawer title={form.getFieldValue('id') ? 'Edit Purchase Order' : 'New Purchase Order'} open={drawer} onClose={async () => { if (await confirmClose(form)) { form.resetFields(); setDrawer(false); } }} width={920}
+        extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>{form.getFieldValue('id') ? 'Save' : 'Create'}</Button>}>
         <Form form={form} layout="vertical" onFinish={save} requiredMark={false}>
+          <Form.Item name="id" hidden><Input /></Form.Item>
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
             <Form.Item name="supplierId" label="Supplier" rules={[{ required: true, message: 'Required' }]} style={{ minWidth: 280, flex: 1 }}>
               <Select showSearch optionFilterProp="label" placeholder="Select supplier"
                 options={suppliers.map((s) => ({ value: s.id, label: `${s.supplierCode} — ${s.name}` }))} />
-            </Form.Item>
-            <Form.Item name="requisitionId" label="Pull from PR (Optional)" style={{ minWidth: 220 }}>
-              <Select allowClear showSearch optionFilterProp="label" placeholder="Select approved PR" onChange={handleRequisitionChange}
-                options={reqs.map((r) => ({ value: r.id, label: r.documentNumber }))} />
             </Form.Item>
             <Form.Item name="postingDate" label="PO Date" rules={[{ required: true, message: 'Required' }]} style={{ width: 180 }}>
               <DatePicker style={{ width: '100%' }} />
@@ -294,6 +342,7 @@ export function PurchaseOrdersPage() {
               <Descriptions.Item label="Status"><StatusBadge status={viewing.status} size="small" /></Descriptions.Item>
               <Descriptions.Item label="Date">{viewing.postingDate}</Descriptions.Item>
               <Descriptions.Item label="Total"><AmountDisplay paise={viewing.totalAmountPaise} /></Descriptions.Item>
+              <Descriptions.Item label="Remarks" span={2}>{viewing.remarks || '-'}</Descriptions.Item>
             </Descriptions>
             <Table style={{ marginTop: 16 }} size="small" rowKey="id" pagination={false}
               dataSource={viewing.lines ?? []}

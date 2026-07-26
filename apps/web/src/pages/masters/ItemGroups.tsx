@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import {
   Table, Button, Drawer, Form, Input, Select, Switch, Typography, Tag,
   message, theme as antTheme,
@@ -28,6 +29,7 @@ function buildTree(rows: ItemGroup[]): TreeRow[] {
 }
 
 export function ItemGroupsPage() {
+  const { confirmClose } = useUnsavedChanges();
   const { company } = usePlantStore();
   const { token: dt } = antTheme.useToken();
   const [form] = Form.useForm();
@@ -143,7 +145,7 @@ export function ItemGroupsPage() {
       <Drawer
         title={editing ? 'Edit Item Group' : 'Add Item Group'}
         open={drawer}
-        onClose={() => setDrawer(false)}
+        onClose={async () => { if (await confirmClose(form)) { form.resetFields(); setDrawer(false); } }}
         width={420}
         extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>Save</Button>}
       >

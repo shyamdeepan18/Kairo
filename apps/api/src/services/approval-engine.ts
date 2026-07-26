@@ -1,6 +1,6 @@
-import { eq, and, asc } from 'drizzle-orm';
+import { eq, and, asc, inArray } from 'drizzle-orm';
 import {
-  db, approvalWorkflows, approvalWorkflowLevels, approvalRequests, approvalActions, userRoles,
+  db, approvalWorkflows, approvalWorkflowLevels, approvalRequests, approvalActions, userRoles, users, roles,
 } from '@erp/db';
 import type { ApprovalWorkflow, ApprovalWorkflowLevel, ApprovalRequest } from '@erp/db';
 import { StatusEngine } from './status-engine.js';
@@ -101,14 +101,15 @@ export class ApprovalEngine {
     requestId: string,
     userId: string,
     action: 'approved' | 'rejected',
-    remarks?: string
+    remarks?: string,
+    options?: { skipFinalizeDoc?: boolean; bypassSod?: boolean }
   ): Promise<ActResult> {
     const [req] = await tx.select().from(approvalRequests).where(eq(approvalRequests.id, requestId)).limit(1);
     if (!req) throw new Error('Approval request not found');
     if (req.status !== 'pending') throw new Error(`Approval request is already ${req.status}`);
 
-    // Segregation of duties — the submitter cannot approve their own document.
-    if (userId === req.createdBy) {
+    // Segregation of duties — the submitter cannot approve their own document, unless bypassed.
+    if (!options?.bypassSod && action === 'approved' && userId === req.createdBy) {
       throw new Error('Segregation of duties: the submitter cannot approve their own document');
     }
 
@@ -117,21 +118,24 @@ export class ApprovalEngine {
     const current = resolved.levels.find((l) => l.level === req.currentLevel);
     if (!current) throw new Error('Current approval level not found');
 
-    // Eligibility for this level
-    if (current.approverType === 'user') {
-      if (current.approverUserId !== userId) throw new Error('You are not the designated approver for this level');
-    } else {
-      if (!current.approverRoleId) throw new Error('Approval level has no role configured');
-      const [hasRole] = await tx
-        .select({ id: userRoles.id })
-        .from(userRoles)
-        .where(and(
-          eq(userRoles.userId, userId),
-          eq(userRoles.companyId, req.companyId),
-          eq(userRoles.roleId, current.approverRoleId),
-        ))
-        .limit(1);
-      if (!hasRole) throw new Error('You do not hold the approver role for this level');
+    // Eligibility for this level (Submitters can always reject/recall their own request)
+    const isSubmitterRecall = action === 'rejected' && userId === req.createdBy;
+    if (!isSubmitterRecall) {
+      if (current.approverType === 'user') {
+        if (current.approverUserId !== userId) throw new Error('You are not the designated approver for this level');
+      } else {
+        if (!current.approverRoleId) throw new Error('Approval level has no role configured');
+        const [hasRole] = await tx
+          .select({ id: userRoles.id })
+          .from(userRoles)
+          .where(and(
+            eq(userRoles.userId, userId),
+            eq(userRoles.companyId, req.companyId),
+            eq(userRoles.roleId, current.approverRoleId),
+          ))
+          .limit(1);
+        if (!hasRole) throw new Error('You do not hold the approver role for this level');
+      }
     }
 
     await tx.insert(approvalActions).values({
@@ -140,7 +144,7 @@ export class ApprovalEngine {
 
     if (action === 'rejected') {
       await tx.update(approvalRequests).set({ status: 'rejected', updatedAt: new Date() }).where(eq(approvalRequests.id, req.id));
-      await this.finalizeDoc(tx, req, 'rejected', userId, remarks);
+      if (!options?.skipFinalizeDoc) await this.finalizeDoc(tx, req, 'rejected', userId, remarks);
       return { finalized: true, decision: 'rejected' };
     }
 
@@ -164,7 +168,7 @@ export class ApprovalEngine {
     }
 
     await tx.update(approvalRequests).set({ status: 'approved', updatedAt: new Date() }).where(eq(approvalRequests.id, req.id));
-    await this.finalizeDoc(tx, req, 'approved', userId, remarks);
+    if (!options?.skipFinalizeDoc) await this.finalizeDoc(tx, req, 'approved', userId, remarks);
     return { finalized: true, decision: 'approved' };
   }
 
@@ -186,5 +190,92 @@ export class ApprovalEngine {
         'submitted', result, remarks, { tx }
       );
     }
+  }
+
+  /** Decorates documents with active approval info (eligibility, hasApproved, etc.). */
+  async decorateDocuments(companyId: string, userId: string, documents: any[], documentType: string) {
+    if (documents.length === 0) return documents;
+
+    const docIds = documents.map((d) => d.id);
+    const pendingRequests = await db
+      .select()
+      .from(approvalRequests)
+      .where(and(
+        eq(approvalRequests.companyId, companyId),
+        eq(approvalRequests.documentType, documentType),
+        inArray(approvalRequests.documentId, docIds),
+        eq(approvalRequests.status, 'pending')
+      ));
+
+    if (pendingRequests.length === 0) {
+      return documents.map((d) => ({ ...d, approvalInfo: null }));
+    }
+
+    const userRoleRows = await db
+      .select({ roleId: userRoles.roleId })
+      .from(userRoles)
+      .where(and(eq(userRoles.userId, userId), eq(userRoles.companyId, companyId)));
+    const userRoleIds = userRoleRows.map((r) => r.roleId);
+
+    const wfIds = pendingRequests.map((r) => r.workflowId);
+    const levels = await db
+      .select()
+      .from(approvalWorkflowLevels)
+      .where(inArray(approvalWorkflowLevels.workflowId, wfIds));
+
+    const reqIds = pendingRequests.map((r) => r.id);
+    const actions = await db
+      .select()
+      .from(approvalActions)
+      .where(inArray(approvalActions.requestId, reqIds));
+
+    const approvalInfoMap = new Map<string, any>();
+
+    for (const req of pendingRequests) {
+      const applicableLevels = levels
+        .filter(
+          (l) => l.workflowId === req.workflowId &&
+            req.amountPaise >= l.thresholdMinPaise &&
+            (l.thresholdMaxPaise == null || req.amountPaise <= l.thresholdMaxPaise)
+        )
+        .sort((a, b) => a.level - b.level);
+
+      const current = applicableLevels.find((l) => l.level === req.currentLevel);
+      if (!current) continue;
+
+      let isEligible = false;
+      if (current.approverType === 'user') {
+        isEligible = current.approverUserId === userId;
+      } else {
+        isEligible = current.approverRoleId ? userRoleIds.includes(current.approverRoleId) : false;
+      }
+
+      const hasApproved = actions.some(
+        (act) => act.requestId === req.id && act.level === req.currentLevel && act.performedBy === userId && act.action === 'approved'
+      );
+
+      let currentApproverName = 'Unknown';
+      if (current.approverType === 'user' && current.approverUserId) {
+        const [u] = await db.select({ fullName: users.fullName }).from(users).where(eq(users.id, current.approverUserId)).limit(1);
+        if (u) currentApproverName = u.fullName;
+      } else if (current.approverRoleId) {
+        const [r] = await db.select({ name: roles.name }).from(roles).where(eq(roles.id, current.approverRoleId)).limit(1);
+        if (r) currentApproverName = `Role: ${r.name}`;
+      }
+
+      approvalInfoMap.set(req.documentId, {
+        requestId: req.id,
+        status: req.status,
+        currentLevel: req.currentLevel,
+        isEligibleApprover: isEligible,
+        hasApproved,
+        currentApproverName
+      });
+    }
+
+    return documents.map((d) => ({
+      ...d,
+      approvalInfo: approvalInfoMap.get(d.id) || null
+    }));
   }
 }

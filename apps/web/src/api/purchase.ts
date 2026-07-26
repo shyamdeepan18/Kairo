@@ -27,7 +27,12 @@ export interface PurchaseHeader {
   taxAmountPaise: number;
   totalAmountPaise: number;
   remarks: string | null;
+  purpose?: string | null;
   createdAt: string;
+  createdBy?: string;
+  submittedBy?: string;
+  createdByName?: string;
+  submittedByName?: string;
 }
 
 export interface PurchaseLineInput {
@@ -60,6 +65,10 @@ const getDoc = <T = any>(path: string, companyId: string, id: string) =>
 const createDoc = <T = any>(path: string, body: Record<string, unknown>) =>
   api.post<T>(`${BASE}/${path}`, body).then((r) => r.data);
 
+const updateDoc = <T = any>(path: string, id: string, body: Record<string, unknown>) =>
+  api.put<T>(`${BASE}/${path}/${id}`, body).then((r) => r.data);
+
+
 /** Lifecycle transition — companyId travels in the body (resolveCompany reads it). */
 const act = (path: string, id: string, action: PurchaseAction, companyId: string, remarks?: string) =>
   api.post(`${BASE}/${path}/${id}/${action}`, { companyId, remarks }).then((r) => r.data);
@@ -82,6 +91,7 @@ export const purchaseApi = {
 
   requisitions: {
     list: (companyId: string, params?: Record<string, unknown>) => listDocs('requisitions', companyId, params),
+    pendingLines: (companyId: string) => api.get(`${BASE}/requisitions/pending-lines`, { params: { companyId } }).then((r) => r.data),
     get: (companyId: string, id: string) => getDoc('requisitions', companyId, id),
     create: (body: Record<string, unknown>) => createDoc('requisitions', body),
     act: (id: string, action: PurchaseAction, companyId: string, remarks?: string) => act('requisitions', id, action, companyId, remarks),
@@ -91,6 +101,7 @@ export const purchaseApi = {
     list: (companyId: string, params?: Record<string, unknown>) => listDocs('orders', companyId, params),
     get: (companyId: string, id: string) => getDoc('orders', companyId, id),
     create: (body: Record<string, unknown>) => createDoc('orders', body),
+    update: (id: string, body: Record<string, unknown>) => updateDoc('orders', id, body),
     act: (id: string, action: PurchaseAction, companyId: string, remarks?: string) => act('orders', id, action, companyId, remarks),
   },
 

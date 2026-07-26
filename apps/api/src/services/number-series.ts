@@ -51,14 +51,15 @@ export class NumberSeriesService {
         FROM document_number_series
         WHERE company_id   = ${companyId}
           AND document_type = ${documentType}
-          AND fiscal_year   = ${fiscalYear}
+          AND (fiscal_year = ${fiscalYear} OR fiscal_year IS NULL)
           AND is_active     = true
           AND (
             plant_id = ${opts?.plantId ?? null}::uuid
             OR plant_id IS NULL
           )
         ORDER BY
-          CASE WHEN plant_id = ${opts?.plantId ?? null}::uuid THEN 0 ELSE 1 END
+          CASE WHEN plant_id = ${opts?.plantId ?? null}::uuid THEN 0 ELSE 1 END,
+          CASE WHEN fiscal_year = ${fiscalYear} THEN 0 ELSE 1 END
         LIMIT 1
         FOR UPDATE
       )

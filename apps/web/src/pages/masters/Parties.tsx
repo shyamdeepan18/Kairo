@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import { useNavigate } from 'react-router-dom';
 import {
   Table, Button, Drawer, Form, Input, Select, Switch, Typography, Tag,
@@ -22,6 +23,7 @@ type Party = Supplier & Customer; // superset for form convenience
 interface PartyPageProps { kind: Kind; }
 
 function PartyPage({ kind }: PartyPageProps) {
+  const { confirmClose } = useUnsavedChanges();
   const { company } = usePlantStore();
   const { token: dt } = antTheme.useToken();
   const navigate = useNavigate();
@@ -197,7 +199,7 @@ function PartyPage({ kind }: PartyPageProps) {
       <Drawer
         title={editing ? `Edit ${noun}` : `Add ${noun}`}
         open={drawer}
-        onClose={() => setDrawer(false)}
+        onClose={async () => { if (await confirmClose(form)) { form.resetFields(); setDrawer(false); } }}
         width={520}
         extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>Save</Button>}
       >

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Typography, Card, Button, Spin, Alert, Row, Col, Badge, theme as antTheme,
+  Typography, Card, Button, Spin, Alert, Row, Col, Badge, Tag, theme as antTheme,
 } from 'antd';
 import {
   BankOutlined,
@@ -51,6 +51,15 @@ export function SelectCompanyPage() {
   }, []);
 
   const handleSelectCompany = async (company: ErpCompany) => {
+    if (!company.hasLicense) {
+      setError(`Company '${company.name}' does not have an active license. Please contact your system administrator.`);
+      return;
+    }
+    if (company.licenseValidTo && new Date(company.licenseValidTo) < new Date()) {
+      setError(`The license for '${company.name}' expired on ${new Date(company.licenseValidTo).toLocaleDateString()}. Please renew the license.`);
+      return;
+    }
+
     setSelectedCompany(company);
     setCompany(company);
     setLoading(true);
@@ -223,8 +232,11 @@ export function SelectCompanyPage() {
                 {companies.map((co) => (
                   <Col xs={24} sm={12} key={co.id}>
                     <Card
-                      hoverable
-                      style={cardHoverStyle}
+                      hoverable={co.hasLicense && (!co.licenseValidTo || new Date(co.licenseValidTo) >= new Date())}
+                      style={{
+                        ...cardHoverStyle,
+                        opacity: co.hasLicense && (!co.licenseValidTo || new Date(co.licenseValidTo) >= new Date()) ? 1 : 0.6,
+                      }}
                       styles={{ body: { padding: '16px 20px' } }}
                       onClick={() => handleSelectCompany(co)}
                     >
@@ -266,6 +278,11 @@ export function SelectCompanyPage() {
                                 </Text>
                               }
                             />
+                            {!co.hasLicense ? (
+                              <Tag color="error" style={{ marginLeft: 8, fontSize: 10, borderRadius: 10, border: 0 }}>No License</Tag>
+                            ) : co.licenseValidTo && new Date(co.licenseValidTo) < new Date() ? (
+                              <Tag color="warning" style={{ marginLeft: 8, fontSize: 10, borderRadius: 10, border: 0 }}>Expired</Tag>
+                            ) : null}
                           </div>
                         </div>
                       </div>

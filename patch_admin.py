@@ -1,79 +1,34 @@
-import re
+import sys
 
-with open('apps/web/src/pages/admin/AdminPortal.tsx', 'r') as f:
+file_path = "apps/web/src/pages/admin/AdminPortal.tsx"
+
+with open(file_path, 'r') as f:
     content = f.read()
 
-# 1. Add editingCompany state
-if 'const [editingCompany, setEditingCompany]' not in content:
-    content = content.replace("const [companyDrawer, setCompanyDrawer] = useState(false);", "const [companyDrawer, setCompanyDrawer] = useState(false);\n  const [editingCompany, setEditingCompany] = useState<AdminCompany | null>(null);")
+# 1. Update ant-design icons
+content = content.replace("BulbFilled,", "BulbFilled, DashboardOutlined,")
 
-# 2. Add openEditCompany function
-open_edit_func = """  const openEditCompany = (company: AdminCompany) => {
-    setEditingCompany(company);
-    companyForm.setFieldsValue({
-      name: company.name,
-      legalName: company.legalName,
-      gstin: company.gstin,
-      baseCurrency: company.baseCurrency,
-    });
-    setCompanyDrawer(true);
-  };
+# 2. Update admin imports
+content = content.replace("type AdminPermission,", "type AdminPermission, type AdminDiagnosticsHealth, type AdminAuditLog,")
 
-  const handleSaveCompany"""
-if 'const openEditCompany' not in content:
-    content = content.replace("const handleCreateCompany", open_edit_func)
+# 3. Update Section type
+content = content.replace("type Section = 'companies' | 'plants' | 'users' | 'roles' | 'license';", "type Section = 'companies' | 'plants' | 'users' | 'roles' | 'license' | 'diagnostics';")
 
-# 3. Update handleSaveCompany logic
-save_logic_old = """  const handleSaveCompany = async (values: any) => {
-    try {
-      await adminApi.createCompany(values);
-      message.success('Company created successfully');
-      companyForm.resetFields();
-      setCompanyDrawer(false);
-      loadCompanies();
-    } catch (e: any) {
-      message.error(e?.response?.data?.error ?? 'Failed to create company');
-    }
-  };"""
-save_logic_new = """  const handleSaveCompany = async (values: any) => {
-    try {
-      if (editingCompany) {
-        await adminApi.updateCompany(editingCompany.id, values);
-        message.success('Company updated successfully');
-      } else {
-        await adminApi.createCompany(values);
-        message.success('Company created successfully');
-      }
-      companyForm.resetFields();
-      setEditingCompany(null);
-      setCompanyDrawer(false);
-      loadCompanies();
-    } catch (e: any) {
-      message.error(e?.response?.data?.error ?? 'Failed to save company');
-    }
-  };"""
-content = content.replace(save_logic_old, save_logic_new)
+# 4. Update menu items
+old_menu = """              { key: 'companies', icon: <BankOutlined />, label: 'Companies', onClick: () => { setSection('companies'); setSelectedCompany(null); } },"""
+new_menu = """              { key: 'companies', icon: <BankOutlined />, label: 'Companies', onClick: () => { setSection('companies'); setSelectedCompany(null); } },
+              { key: 'diagnostics', icon: <DashboardOutlined />, label: 'Diagnostics', onClick: () => { setSection('diagnostics'); setSelectedCompany(null); } },"""
+content = content.replace(old_menu, new_menu)
 
-# 4. Update the "Create Company" button onClick to reset editingCompany
-if 'setEditingCompany(null);' not in content.split("Create Company")[0][-200:]:
-    content = content.replace("onClick={() => { companyForm.resetFields(); setCompanyDrawer(true); }}>\n                  Create Company", "onClick={() => { companyForm.resetFields(); setEditingCompany(null); setCompanyDrawer(true); }}>\n                  Create Company")
+# 5. Add renderContent case
+old_render_case = """      case 'companies':
+        return renderCompanies();"""
+new_render_case = """      case 'companies':
+        return renderCompanies();
+      case 'diagnostics':
+        return <DiagnosticsPanel />;"""
+content = content.replace(old_render_case, new_render_case)
 
-# 5. Add Edit button to companyColumns
-if 'openEditCompany(r)' not in content:
-    content = content.replace("""        <Space size={4} wrap>
-          <Popconfirm""", """        <Space size={4} wrap>
-          <Button size="small" icon={<EditOutlined />} onClick={(e) => { e.stopPropagation(); openEditCompany(r); }}>Edit</Button>
-          <Popconfirm""")
-
-# 6. Add Users column to plantColumns
-if "dataIndex: 'userCount'" not in content:
-    content = content.replace("{ title: 'City', dataIndex: 'city'", "{ title: 'Users', dataIndex: 'userCount', render: (v: number) => v ?? 0 },\n    { title: 'City', dataIndex: 'city'")
-
-# 7. Update Drawer title
-content = content.replace("""title="Provision New Tenant Company\"""", """title={editingCompany ? 'Edit Company' : 'Provision New Tenant Company'}""")
-# 8. Update Form onFinish
-content = content.replace("onFinish={handleCreateCompany}", "onFinish={handleSaveCompany}")
-
-with open('apps/web/src/pages/admin/AdminPortal.tsx', 'w') as f:
+with open(file_path, 'w') as f:
     f.write(content)
 

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import { Table, Button, Card, Tag, Modal, Form, Input, DatePicker, Select, InputNumber, Space, Typography, Alert, message } from 'antd';
 import { PlusOutlined, CheckCircleOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -38,6 +39,7 @@ interface JournalEntry {
 }
 
 export function JournalVouchersPage() {
+  const { confirmClose } = useUnsavedChanges();
   const [loading, setLoading] = useState(false);
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [coaAccounts, setCoaAccounts] = useState<CoaAccount[]>([]);
@@ -203,7 +205,16 @@ export function JournalVouchersPage() {
       <Modal
         title="Create Manual Journal Voucher"
         open={isModalOpen}
-        onCancel={() => setIsModalOpen(false)}
+        onCancel={async () => {
+          if (await confirmClose(form, { content: 'You have an unsaved journal voucher. Discard it?' })) {
+            form.resetFields();
+            setLines([
+              { accountId: '', debitAmountRupees: 0, creditAmountRupees: 0, narration: '' },
+              { accountId: '', debitAmountRupees: 0, creditAmountRupees: 0, narration: '' },
+            ]);
+            setIsModalOpen(false);
+          }
+        }}
         width={900}
         footer={null}
       >

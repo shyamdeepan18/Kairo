@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import { Table, Button, Drawer, Form, DatePicker, Input, Select, Typography, Descriptions, message } from 'antd';
 import dayjs from 'dayjs';
 import { PlusOutlined, EyeOutlined } from '@ant-design/icons';
@@ -16,6 +18,8 @@ import {
 const { Title, Text } = Typography;
 
 export function QuotationsPage() {
+  const navigate = useNavigate();
+  const { confirmClose } = useUnsavedChanges();
   const { company, plant } = usePlantStore();
   const { cardStyle } = useCardStyle();
   const [form] = Form.useForm();
@@ -102,7 +106,7 @@ export function QuotationsPage() {
       <div style={cardStyle}><Table dataSource={rows} columns={columns} rowKey="id" loading={loading} pagination={{ pageSize: 20, hideOnSinglePage: true }} locale={{ emptyText: 'No quotations yet.' }} /></div>
 
       {/* Create drawer */}
-      <Drawer title="New Quotation" open={drawer} onClose={() => setDrawer(false)} width={920} extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>Create</Button>}>
+      <Drawer title="New Quotation" open={drawer} onClose={async () => { if (await confirmClose(form)) { form.resetFields(); setDrawer(false); } }} width={920} extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>Create</Button>}>
         <Form form={form} layout="vertical" onFinish={save} requiredMark={false}>
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
             <Form.Item name="customerId" label="Customer" rules={[{ required: true, message: 'Required' }]} style={{ minWidth: 280, flex: 1 }}>
@@ -118,7 +122,24 @@ export function QuotationsPage() {
       </Drawer>
 
       {/* View drawer */}
-      <Drawer title={viewing?.documentNumber ?? 'Quotation'} open={!!viewing} onClose={() => setViewing(null)} width={720}>
+      <Drawer
+        title={viewing?.documentNumber ?? 'Quotation'}
+        open={!!viewing}
+        onClose={() => setViewing(null)}
+        width={720}
+        extra={
+          viewing?.status === 'approved' ? (
+            <Button
+              type="primary"
+              onClick={() => {
+                navigate('/sales/orders', { state: { createSoFromQuote: viewing, customerId: viewing.customerId, remarks: viewing.remarks } });
+              }}
+            >
+              Create Sales Order
+            </Button>
+          ) : null
+        }
+      >
         {viewing && (
           <>
             <Descriptions column={2} size="small" styles={{ label: { width: 130 } }}>

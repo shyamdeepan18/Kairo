@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import { Table, Button, Drawer, Form, Input, Select, InputNumber, Typography, Descriptions, message, Tabs } from 'antd';
 import { PlusOutlined, DeleteOutlined, EyeOutlined } from '@ant-design/icons';
 import { usePlantStore } from '../../store/plant';
@@ -19,6 +20,7 @@ const newOut = (): DraftOutput => ({ key: s2++, expectedQty: 1, outputType: 'mai
 const newOp = (): DraftOp => ({ key: s3++, operationNumber: s3 * 10, name: '', setupTimeMin: 0, runTimePerUnitMin: 0 });
 
 export function FormulasPage() {
+  const { confirmClose } = useUnsavedChanges();
   const { company } = usePlantStore();
   const { cardStyle } = useCardStyle();
   const [form] = Form.useForm();
@@ -113,7 +115,7 @@ export function FormulasPage() {
           ]} />
       </div>
 
-      <Drawer title="New Formula" open={drawer} onClose={() => setDrawer(false)} width={960} extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>Create</Button>}>
+      <Drawer title="New Formula" open={drawer} onClose={async () => { if (await confirmClose(form)) { form.resetFields(); setDrawer(false); } }} width={960} extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>Create</Button>}>
         <Form form={form} layout="vertical" onFinish={save} requiredMark={false}>
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
             <Form.Item name="formulaCode" label="Code" rules={[{ required: true }]} style={{ width: 140 }}><Input /></Form.Item>

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import {
   Tree, Button, Typography, Tag, Drawer, Form, Input, Select,
   Switch, Spin, message, Modal, Alert, Tooltip, theme as antTheme,
@@ -156,6 +157,7 @@ function toTreeData(
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function ChartOfAccountsPage() {
+  const { confirmClose } = useUnsavedChanges();
   const { company } = usePlantStore();
   const { token: dt } = antTheme.useToken();
   const [addForm] = Form.useForm();
@@ -303,7 +305,7 @@ export function ChartOfAccountsPage() {
       <Drawer
         title={addParent ? `Add account under "${addParent.name}"` : 'Add Account'}
         open={!!addParent}
-        onClose={() => setAddParent(null)}
+        onClose={async () => { if (await confirmClose(addForm)) { addForm.resetFields(); setAddParent(null); } }}
         width={420}
         extra={
           <Button type="primary" loading={addSaving} onClick={() => addForm.submit()}>
@@ -376,7 +378,7 @@ export function ChartOfAccountsPage() {
       <Drawer
         title={editTarget ? `Edit "${editTarget.name}"` : 'Edit Account'}
         open={!!editTarget}
-        onClose={() => setEditTarget(null)}
+        onClose={async () => { if (await confirmClose(editForm)) { editForm.resetFields(); setEditTarget(null); } }}
         width={420}
         extra={
           <Button type="primary" loading={editSaving} onClick={() => editForm.submit()}>
