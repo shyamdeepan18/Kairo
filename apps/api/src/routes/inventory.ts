@@ -5,12 +5,15 @@ import {
   stockBalances, stockLedgerEntries,
   stockAdjustments, stockAdjustmentLines,
   stockTransfers, stockTransferLines,
-  items, warehouses,
+  items, warehouses, plants,
 } from '@erp/db';
 import { z } from 'zod';
 import { authorize } from '../middleware/authorize.js';
-import { resolveCompany, companyId } from '../middleware/company-context.js';
+import { resolveTenantContext, tenant } from '../middleware/tenant-context.js';
+import { byTenantId } from '../db/tenant-query.js';
 import { requireModule } from '../middleware/require-module.js';
+import { stripServerOwned } from '../db/dto.js';
+import { assertOwned, assertAllOwned } from '../db/fk-ownership.js';
 import { fiscalPeriod, type PostingContext } from '../services/posting-engine.js';
 import type { DocumentStatus } from '../services/status-engine.js';
 
@@ -25,8 +28,8 @@ const adjLineSchema = z.object({
   valuationRatePaise: z.number().int().nonnegative().optional(),
 });
 
+// companyId is derived from the trusted tenant context, never a client input.
 const adjCreateSchema = z.object({
-  companyId:      z.string().uuid(),
   plantId:        z.string().uuid(),
   warehouseId:    z.string().uuid(),
   postingDate:    z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -34,7 +37,7 @@ const adjCreateSchema = z.object({
   reason:         z.string().optional(),
   remarks:        z.string().optional(),
   lines:          z.array(adjLineSchema).min(1),
-});
+}).strict();
 
 const transferLineSchema = z.object({
   itemId:       z.string().uuid(),
@@ -45,7 +48,6 @@ const transferLineSchema = z.object({
 });
 
 const transferCreateSchema = z.object({
-  companyId:       z.string().uuid(),
   plantId:         z.string().uuid(),
   fromWarehouseId: z.string().uuid(),
   toWarehouseId:   z.string().uuid(),
@@ -54,7 +56,7 @@ const transferCreateSchema = z.object({
   remarks:         z.string().optional(),
   vehicleNo:       z.string().optional(),
   lines:           z.array(transferLineSchema).min(1),
-});
+}).strict();
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -73,6 +75,10 @@ function paginate(query: Record<string, unknown>) {
 // ─── Main plugin ─────────────────────────────────────────────────────────────
 
 export default async function inventoryRoutes(app: FastifyInstance) {
+  // Authenticate at the group level FIRST so the module gate below sees the
+  // trusted JWT context (request.user.activeCompanyId) instead of client input.
+  // Individual routes still run authenticate + resolveTenantContext + authorize.
+  app.addHook('preHandler', app.authenticate);
   app.addHook('preHandler', requireModule('inventory'));
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -80,9 +86,9 @@ export default async function inventoryRoutes(app: FastifyInstance) {
   // ══════════════════════════════════════════════════════════════════════════
 
   app.get('/stock-balances', {
-    preHandler: [app.authenticate, resolveCompany, authorize('inventory.stock.view')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('inventory.stock.view')],
   }, async (request) => {
-    const cid = companyId(request);
+    const cid = tenant(request).companyId;
     const q = request.query as Record<string, unknown>;
     const { page, pageSize, limit, offset } = paginate(q);
 
@@ -126,9 +132,9 @@ export default async function inventoryRoutes(app: FastifyInstance) {
   // ══════════════════════════════════════════════════════════════════════════
 
   app.get('/stock-ledger', {
-    preHandler: [app.authenticate, resolveCompany, authorize('inventory.stock.view')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('inventory.stock.view')],
   }, async (request) => {
-    const cid = companyId(request);
+    const cid = tenant(request).companyId;
     const q = request.query as Record<string, unknown>;
     const { page, pageSize, limit, offset } = paginate(q);
 
@@ -176,21 +182,27 @@ export default async function inventoryRoutes(app: FastifyInstance) {
   // ══════════════════════════════════════════════════════════════════════════
 
   app.post('/adjustments', {
-    preHandler: [app.authenticate, resolveCompany, authorize('inventory.adjustment.create', { plantFrom: 'body.plantId' })],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('inventory.adjustment.create', { plantFrom: 'body.plantId' })],
   }, async (request, reply) => {
-    const parsed = adjCreateSchema.safeParse(request.body);
+    const parsed = adjCreateSchema.safeParse(stripServerOwned(request.body));
     if (!parsed.success) return bad(reply, parsed);
     const d = parsed.data;
+    const cid = tenant(request).companyId; // trusted; body companyId is ignored
+    await Promise.all([
+      assertOwned(plants, d.plantId, cid, 'Plant'),
+      assertOwned(warehouses, d.warehouseId, cid, 'Warehouse'),
+      assertAllOwned(items, d.lines.map((l) => l.itemId), cid, 'Item'),
+    ]);
     const { fiscalYear, period } = fiscalPeriod(new Date(d.postingDate));
     const uid = userId(request);
 
     const created = await db.transaction(async (tx) => {
-      const docNumber = await app.numberSeriesService.next(tx, d.companyId, 'inventory.adjustment', { fiscalYear, plantId: d.plantId });
+      const docNumber = await app.numberSeriesService.next(tx, cid, 'inventory.adjustment', { fiscalYear, plantId: d.plantId });
 
       const totalPaise = d.lines.reduce((s, l) => s + Math.round((l.valuationRatePaise ?? 0) * l.quantity), 0);
 
       const [adj] = await tx.insert(stockAdjustments).values({
-        companyId: d.companyId, plantId: d.plantId, warehouseId: d.warehouseId,
+        companyId: cid, plantId: d.plantId, warehouseId: d.warehouseId,
         documentNumber: docNumber, postingDate: d.postingDate as any,
         fiscalYear, period, adjustmentType: d.adjustmentType,
         reason: d.reason, remarks: d.remarks, status: 'draft',
@@ -213,9 +225,9 @@ export default async function inventoryRoutes(app: FastifyInstance) {
   });
 
   app.get('/adjustments', {
-    preHandler: [app.authenticate, resolveCompany, authorize('inventory.adjustment.view')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('inventory.adjustment.view')],
   }, async (request) => {
-    const cid = companyId(request);
+    const cid = tenant(request).companyId;
     const q = request.query as Record<string, unknown>;
     const { page, pageSize, limit, offset } = paginate(q);
     const filters = [eq(stockAdjustments.companyId, cid)];
@@ -227,10 +239,12 @@ export default async function inventoryRoutes(app: FastifyInstance) {
   });
 
   app.get('/adjustments/:id', {
-    preHandler: [app.authenticate, resolveCompany, authorize('inventory.adjustment.view')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('inventory.adjustment.view')],
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const [adj] = await db.select().from(stockAdjustments).where(eq(stockAdjustments.id, id)).limit(1);
+    const cid = tenant(request).companyId;
+    const [adj] = await db.select().from(stockAdjustments)
+      .where(byTenantId(stockAdjustments, id, cid)).limit(1);
     if (!adj) return reply.code(404).send({ error: 'Adjustment not found' });
     const lines = await db.select().from(stockAdjustmentLines).where(eq(stockAdjustmentLines.adjustmentId, id));
     return { ...adj, lines };
@@ -238,12 +252,13 @@ export default async function inventoryRoutes(app: FastifyInstance) {
 
   // Submit
   app.post('/adjustments/:id/submit', {
-    preHandler: [app.authenticate, resolveCompany, authorize('inventory.adjustment.create')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('inventory.adjustment.create')],
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const uid = userId(request);
-    const cid = companyId(request);
-    const [adj] = await db.select().from(stockAdjustments).where(eq(stockAdjustments.id, id)).limit(1);
+    const cid = tenant(request).companyId;
+    const [adj] = await db.select().from(stockAdjustments)
+      .where(byTenantId(stockAdjustments, id, cid)).limit(1);
     if (!adj) return reply.code(404).send({ error: 'Not found' });
     if (adj.status !== 'draft') return reply.code(409).send({ error: `Adjustment is '${adj.status}', not draft` });
     try {
@@ -258,12 +273,16 @@ export default async function inventoryRoutes(app: FastifyInstance) {
 
   // Approve → post stock + GL
   app.post('/adjustments/:id/approve', {
-    preHandler: [app.authenticate, resolveCompany, authorize('inventory.adjustment.approve')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('inventory.adjustment.approve')],
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const uid = userId(request);
-    const cid = companyId(request);
-    const [adj] = await db.select().from(stockAdjustments).where(eq(stockAdjustments.id, id)).limit(1);
+    const cid = tenant(request).companyId;
+    // Finding #1 fix: fetch the adjustment scoped to the caller's company so a
+    // foreign document id returns 404 and can never be posted into this tenant's
+    // stock ledger / GL. adj.plantId & adj.warehouseId are therefore in-tenant.
+    const [adj] = await db.select().from(stockAdjustments)
+      .where(byTenantId(stockAdjustments, id, cid)).limit(1);
     if (!adj) return reply.code(404).send({ error: 'Not found' });
     if (adj.status !== 'submitted') return reply.code(409).send({ error: `Adjustment must be submitted (is '${adj.status}')` });
     const lines = await db.select().from(stockAdjustmentLines).where(eq(stockAdjustmentLines.adjustmentId, id));
@@ -318,13 +337,15 @@ export default async function inventoryRoutes(app: FastifyInstance) {
 
   // Reject
   app.post('/adjustments/:id/reject', {
-    preHandler: [app.authenticate, resolveCompany, authorize('inventory.adjustment.approve')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('inventory.adjustment.approve')],
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const uid = userId(request);
-    const [adj] = await db.select().from(stockAdjustments).where(eq(stockAdjustments.id, id)).limit(1);
+    const cid = tenant(request).companyId;
+    const [adj] = await db.select().from(stockAdjustments)
+      .where(byTenantId(stockAdjustments, id, cid)).limit(1);
     if (!adj) return reply.code(404).send({ error: 'Not found' });
-    await db.update(stockAdjustments).set({ status: 'rejected', rejectedAt: new Date(), rejectedBy: uid, updatedAt: new Date() }).where(eq(stockAdjustments.id, id));
+    await db.update(stockAdjustments).set({ status: 'rejected', rejectedAt: new Date(), rejectedBy: uid, updatedAt: new Date() }).where(byTenantId(stockAdjustments, id, cid));
     return reply.send({ ok: true, status: 'rejected' });
   });
 
@@ -333,21 +354,28 @@ export default async function inventoryRoutes(app: FastifyInstance) {
   // ══════════════════════════════════════════════════════════════════════════
 
   app.post('/transfers', {
-    preHandler: [app.authenticate, resolveCompany, authorize('inventory.transfer.create', { plantFrom: 'body.plantId' })],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('inventory.transfer.create', { plantFrom: 'body.plantId' })],
   }, async (request, reply) => {
-    const parsed = transferCreateSchema.safeParse(request.body);
+    const parsed = transferCreateSchema.safeParse(stripServerOwned(request.body));
     if (!parsed.success) return bad(reply, parsed);
     const d = parsed.data;
     if (d.fromWarehouseId === d.toWarehouseId) return reply.code(400).send({ error: 'Source and destination warehouse must be different' });
     const { fiscalYear, period } = fiscalPeriod(new Date(d.postingDate));
     const uid = userId(request);
+    const cid = tenant(request).companyId; // trusted; body companyId is ignored
+    await Promise.all([
+      assertOwned(plants, d.plantId, cid, 'Plant'),
+      assertOwned(warehouses, d.fromWarehouseId, cid, 'Source warehouse'),
+      assertOwned(warehouses, d.toWarehouseId, cid, 'Destination warehouse'),
+      assertAllOwned(items, d.lines.map((l) => l.itemId), cid, 'Item'),
+    ]);
 
     const created = await db.transaction(async (tx) => {
-      const docNumber = await app.numberSeriesService.next(tx, d.companyId, 'inventory.transfer', { fiscalYear, plantId: d.plantId });
+      const docNumber = await app.numberSeriesService.next(tx, cid, 'inventory.transfer', { fiscalYear, plantId: d.plantId });
       const totalPaise = d.lines.reduce((s, l) => s + Math.round((l.valuationRatePaise ?? 0) * l.quantity), 0);
 
       const [tr] = await tx.insert(stockTransfers).values({
-        companyId: d.companyId, plantId: d.plantId,
+        companyId: cid, plantId: d.plantId,
         documentNumber: docNumber, postingDate: d.postingDate as any,
         fiscalYear, period,
         fromWarehouseId: d.fromWarehouseId, toWarehouseId: d.toWarehouseId,
@@ -370,9 +398,9 @@ export default async function inventoryRoutes(app: FastifyInstance) {
   });
 
   app.get('/transfers', {
-    preHandler: [app.authenticate, resolveCompany, authorize('inventory.transfer.view')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('inventory.transfer.view')],
   }, async (request) => {
-    const cid = companyId(request);
+    const cid = tenant(request).companyId;
     const q = request.query as Record<string, unknown>;
     const { page, pageSize, limit, offset } = paginate(q);
     const filters = [eq(stockTransfers.companyId, cid)];
@@ -384,10 +412,12 @@ export default async function inventoryRoutes(app: FastifyInstance) {
   });
 
   app.get('/transfers/:id', {
-    preHandler: [app.authenticate, resolveCompany, authorize('inventory.transfer.view')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('inventory.transfer.view')],
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const [tr] = await db.select().from(stockTransfers).where(eq(stockTransfers.id, id)).limit(1);
+    const cid = tenant(request).companyId;
+    const [tr] = await db.select().from(stockTransfers)
+      .where(byTenantId(stockTransfers, id, cid)).limit(1);
     if (!tr) return reply.code(404).send({ error: 'Transfer not found' });
     const lines = await db.select().from(stockTransferLines).where(eq(stockTransferLines.transferId, id));
     return { ...tr, lines };
@@ -395,25 +425,29 @@ export default async function inventoryRoutes(app: FastifyInstance) {
 
   // Submit
   app.post('/transfers/:id/submit', {
-    preHandler: [app.authenticate, resolveCompany, authorize('inventory.transfer.create')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('inventory.transfer.create')],
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const uid = userId(request);
-    const [tr] = await db.select().from(stockTransfers).where(eq(stockTransfers.id, id)).limit(1);
+    const cid = tenant(request).companyId;
+    const [tr] = await db.select().from(stockTransfers)
+      .where(byTenantId(stockTransfers, id, cid)).limit(1);
     if (!tr) return reply.code(404).send({ error: 'Not found' });
     if (tr.status !== 'draft') return reply.code(409).send({ error: `Transfer is '${tr.status}', not draft` });
-    await db.update(stockTransfers).set({ status: 'submitted', submittedAt: new Date(), submittedBy: uid, updatedAt: new Date() }).where(eq(stockTransfers.id, id));
+    await db.update(stockTransfers).set({ status: 'submitted', submittedAt: new Date(), submittedBy: uid, updatedAt: new Date() }).where(byTenantId(stockTransfers, id, cid));
     return reply.send({ ok: true, status: 'submitted' });
   });
 
   // Approve → post stock (issue from source + receipt to destination)
   app.post('/transfers/:id/approve', {
-    preHandler: [app.authenticate, resolveCompany, authorize('inventory.transfer.approve')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('inventory.transfer.approve')],
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const uid = userId(request);
-    const cid = companyId(request);
-    const [tr] = await db.select().from(stockTransfers).where(eq(stockTransfers.id, id)).limit(1);
+    const cid = tenant(request).companyId;
+    // Scope to the caller's company so a foreign transfer can't be posted here.
+    const [tr] = await db.select().from(stockTransfers)
+      .where(byTenantId(stockTransfers, id, cid)).limit(1);
     if (!tr) return reply.code(404).send({ error: 'Not found' });
     if (tr.status !== 'submitted') return reply.code(409).send({ error: `Transfer must be submitted (is '${tr.status}')` });
     const lines = await db.select().from(stockTransferLines).where(eq(stockTransferLines.transferId, id));
@@ -455,13 +489,15 @@ export default async function inventoryRoutes(app: FastifyInstance) {
 
   // Reject
   app.post('/transfers/:id/reject', {
-    preHandler: [app.authenticate, resolveCompany, authorize('inventory.transfer.approve')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('inventory.transfer.approve')],
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const uid = userId(request);
-    const [tr] = await db.select().from(stockTransfers).where(eq(stockTransfers.id, id)).limit(1);
+    const cid = tenant(request).companyId;
+    const [tr] = await db.select().from(stockTransfers)
+      .where(byTenantId(stockTransfers, id, cid)).limit(1);
     if (!tr) return reply.code(404).send({ error: 'Not found' });
-    await db.update(stockTransfers).set({ status: 'rejected', rejectedAt: new Date(), rejectedBy: uid, updatedAt: new Date() }).where(eq(stockTransfers.id, id));
+    await db.update(stockTransfers).set({ status: 'rejected', rejectedAt: new Date(), rejectedBy: uid, updatedAt: new Date() }).where(byTenantId(stockTransfers, id, cid));
     return reply.send({ ok: true, status: 'rejected' });
   });
 }

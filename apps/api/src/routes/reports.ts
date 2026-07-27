@@ -3,6 +3,7 @@ import { db, stockLedgerEntries, items, warehouses, journalEntryLines, journalEn
 import { eq, and, gte, lte, asc } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
+import { resolveTenantContext, tenant } from '../middleware/tenant-context.js';
 
 const stockLedgerSchema = z.object({
   itemId: z.string().uuid().optional(),
@@ -18,18 +19,21 @@ const generalLedgerSchema = z.object({
 });
 
 const reportsRoutes: FastifyPluginAsync = async (fastify) => {
-  // All reports require authentication
+  // All reports require authentication AND a selected tenant context. Every
+  // query below is filtered by the active company id — reports must never leak
+  // another tenant's financial data.
   fastify.addHook('onRequest', fastify.authenticate);
+  fastify.addHook('onRequest', resolveTenantContext);
 
   // ─── STOCK LEDGER REPORT ─────────────────────────────────────────────────────
   fastify.get('/stock-ledger', async (request, reply) => {
     try {
       const query = stockLedgerSchema.parse(request.query);
-      
-      const conditions = [];
-      // In a real multi-tenant/multi-company app, you must enforce companyId from req.user
-      // Assuming single-tenant or first company for now, or you'd get it from headers/auth.
-      
+      const { companyId } = tenant(request);
+
+      // Tenant scope is mandatory and comes first — never trust client input for it.
+      const conditions = [eq(stockLedgerEntries.companyId, companyId)];
+
       if (query.itemId) conditions.push(eq(stockLedgerEntries.itemId, query.itemId));
       if (query.warehouseId) conditions.push(eq(stockLedgerEntries.warehouseId, query.warehouseId));
       if (query.startDate) conditions.push(gte(stockLedgerEntries.postingDate, query.startDate));
@@ -68,8 +72,10 @@ const reportsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get('/general-ledger', async (request, reply) => {
     try {
       const query = generalLedgerSchema.parse(request.query);
+      const { companyId } = tenant(request);
 
-      const conditions = [];
+      // Scope through the tenant-owned parent (journal_entry_lines has no companyId).
+      const conditions = [eq(journalEntries.companyId, companyId)];
       if (query.accountId) conditions.push(eq(journalEntryLines.accountId, query.accountId));
       if (query.startDate) conditions.push(gte(journalEntries.postingDate, query.startDate));
       if (query.endDate) conditions.push(lte(journalEntries.postingDate, query.endDate));
@@ -104,19 +110,25 @@ const reportsRoutes: FastifyPluginAsync = async (fastify) => {
   // ─── PROFIT & LOSS ────────────────────────────────────────────────────────
   fastify.get('/profit-loss', async (request, reply) => {
     try {
+      const { companyId } = tenant(request);
       const records = await db
         .select({
           accountId: chartOfAccounts.id,
           accountCode: chartOfAccounts.code,
           accountName: chartOfAccounts.name,
           accountType: chartOfAccounts.accountType,
-          totalDebit: sql<number>`SUM(${journalEntryLines.debitAmountPaise})`.mapWith(Number),
-          totalCredit: sql<number>`SUM(${journalEntryLines.creditAmountPaise})`.mapWith(Number),
+          totalDebit: sql<number>`COALESCE(SUM(CASE WHEN ${journalEntries.companyId} = ${companyId} THEN ${journalEntryLines.debitAmountPaise} ELSE 0 END), 0)`.mapWith(Number),
+          totalCredit: sql<number>`COALESCE(SUM(CASE WHEN ${journalEntries.companyId} = ${companyId} THEN ${journalEntryLines.creditAmountPaise} ELSE 0 END), 0)`.mapWith(Number),
         })
-        .from(journalEntryLines)
-        .innerJoin(chartOfAccounts, eq(journalEntryLines.accountId, chartOfAccounts.id))
+        .from(chartOfAccounts)
+        .leftJoin(journalEntryLines, eq(chartOfAccounts.id, journalEntryLines.accountId))
+        .leftJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
         .where(
-          sql`${chartOfAccounts.accountType} IN ('revenue', 'expense')`
+          and(
+            eq(chartOfAccounts.companyId, companyId),
+            eq(chartOfAccounts.isGroup, false),
+            sql`${chartOfAccounts.accountType} IN ('revenue', 'expense')`,
+          )
         )
         .groupBy(chartOfAccounts.id)
         .orderBy(asc(chartOfAccounts.code));
@@ -136,29 +148,76 @@ const reportsRoutes: FastifyPluginAsync = async (fastify) => {
   // ─── BALANCE SHEET ────────────────────────────────────────────────────────
   fastify.get('/balance-sheet', async (request, reply) => {
     try {
+      const { companyId } = tenant(request);
+
+      // 1. Fetch all asset, liability, equity non-group accounts with posted amounts
       const records = await db
         .select({
           accountId: chartOfAccounts.id,
           accountCode: chartOfAccounts.code,
           accountName: chartOfAccounts.name,
           accountType: chartOfAccounts.accountType,
-          totalDebit: sql<number>`SUM(${journalEntryLines.debitAmountPaise})`.mapWith(Number),
-          totalCredit: sql<number>`SUM(${journalEntryLines.creditAmountPaise})`.mapWith(Number),
+          totalDebit: sql<number>`COALESCE(SUM(CASE WHEN ${journalEntries.companyId} = ${companyId} THEN ${journalEntryLines.debitAmountPaise} ELSE 0 END), 0)`.mapWith(Number),
+          totalCredit: sql<number>`COALESCE(SUM(CASE WHEN ${journalEntries.companyId} = ${companyId} THEN ${journalEntryLines.creditAmountPaise} ELSE 0 END), 0)`.mapWith(Number),
         })
-        .from(journalEntryLines)
-        .innerJoin(chartOfAccounts, eq(journalEntryLines.accountId, chartOfAccounts.id))
+        .from(chartOfAccounts)
+        .leftJoin(journalEntryLines, eq(chartOfAccounts.id, journalEntryLines.accountId))
+        .leftJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
         .where(
-          sql`${chartOfAccounts.accountType} IN ('asset', 'liability', 'equity')`
+          and(
+            eq(chartOfAccounts.companyId, companyId),
+            eq(chartOfAccounts.isGroup, false),
+            sql`${chartOfAccounts.accountType} IN ('asset', 'liability', 'equity')`,
+          )
         )
         .groupBy(chartOfAccounts.id)
         .orderBy(asc(chartOfAccounts.code));
 
-      return records.map(r => ({
+      // 2. Fetch Net Profit from Revenue and Expense accounts for Equity balancing
+      const plRecords = await db
+        .select({
+          accountType: chartOfAccounts.accountType,
+          totalDebit: sql<number>`COALESCE(SUM(CASE WHEN ${journalEntries.companyId} = ${companyId} THEN ${journalEntryLines.debitAmountPaise} ELSE 0 END), 0)`.mapWith(Number),
+          totalCredit: sql<number>`COALESCE(SUM(CASE WHEN ${journalEntries.companyId} = ${companyId} THEN ${journalEntryLines.creditAmountPaise} ELSE 0 END), 0)`.mapWith(Number),
+        })
+        .from(chartOfAccounts)
+        .leftJoin(journalEntryLines, eq(chartOfAccounts.id, journalEntryLines.accountId))
+        .leftJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
+        .where(
+          and(
+            eq(chartOfAccounts.companyId, companyId),
+            eq(chartOfAccounts.isGroup, false),
+            sql`${chartOfAccounts.accountType} IN ('revenue', 'expense')`,
+          )
+        )
+        .groupBy(chartOfAccounts.id);
+
+      let netProfitPaise = 0;
+      for (const r of plRecords) {
+        if (r.accountType === 'revenue') netProfitPaise += (r.totalCredit - r.totalDebit);
+        if (r.accountType === 'expense') netProfitPaise -= (r.totalDebit - r.totalCredit);
+      }
+
+      const result = records.map(r => ({
         ...r,
         balance: r.accountType === 'asset' 
           ? r.totalDebit - r.totalCredit 
           : r.totalCredit - r.totalDebit
       }));
+
+      if (netProfitPaise !== 0) {
+        result.push({
+          accountId: 'net-profit-current-period',
+          accountCode: '3999',
+          accountName: 'Current Period Net Profit / (Loss)',
+          accountType: 'equity',
+          totalDebit: netProfitPaise < 0 ? Math.abs(netProfitPaise) : 0,
+          totalCredit: netProfitPaise > 0 ? netProfitPaise : 0,
+          balance: netProfitPaise,
+        });
+      }
+
+      return result;
     } catch (error) {
       request.log.error(error);
       reply.status(500).send({ error: 'Failed to fetch Balance Sheet' });
@@ -168,26 +227,26 @@ const reportsRoutes: FastifyPluginAsync = async (fastify) => {
   // ─── AR AGING ────────────────────────────────────────────────────────
   fastify.get('/ar-aging', async (request, reply) => {
     try {
+      const { companyId } = tenant(request);
       const query = sql`
-        SELECT 
+        SELECT
+          c.id as party_id,
           c.name as customer_name,
-          jel.party_id,
-          SUM(jel.debit_amount_paise) as total_debit,
-          SUM(jel.credit_amount_paise) as total_credit,
-          SUM(jel.debit_amount_paise - jel.credit_amount_paise) as outstanding,
-          SUM(CASE WHEN current_date - je.posting_date <= 30 THEN jel.debit_amount_paise - jel.credit_amount_paise ELSE 0 END) as "0_30",
-          SUM(CASE WHEN current_date - je.posting_date > 30 AND current_date - je.posting_date <= 60 THEN jel.debit_amount_paise - jel.credit_amount_paise ELSE 0 END) as "31_60",
-          SUM(CASE WHEN current_date - je.posting_date > 60 AND current_date - je.posting_date <= 90 THEN jel.debit_amount_paise - jel.credit_amount_paise ELSE 0 END) as "61_90",
-          SUM(CASE WHEN current_date - je.posting_date > 90 THEN jel.debit_amount_paise - jel.credit_amount_paise ELSE 0 END) as "90_plus"
-        FROM journal_entry_lines jel
-        JOIN journal_entries je ON jel.journal_entry_id = je.id
-        JOIN customers c ON jel.party_id = c.id
-        WHERE jel.party_type = 'customer'
-        GROUP BY c.name, jel.party_id
-        HAVING SUM(jel.debit_amount_paise - jel.credit_amount_paise) > 0
+          COALESCE(SUM(si.total_amount_paise), 0) as total_debit,
+          COALESCE(SUM(COALESCE(si.received_amount_paise, 0)), 0) as total_credit,
+          COALESCE(SUM(si.total_amount_paise - COALESCE(si.received_amount_paise, 0)), 0) as outstanding,
+          COALESCE(SUM(CASE WHEN CURRENT_DATE - CAST(si.posting_date AS DATE) <= 30 THEN si.total_amount_paise - COALESCE(si.received_amount_paise, 0) ELSE 0 END), 0) as "0_30",
+          COALESCE(SUM(CASE WHEN CURRENT_DATE - CAST(si.posting_date AS DATE) > 30 AND CURRENT_DATE - CAST(si.posting_date AS DATE) <= 60 THEN si.total_amount_paise - COALESCE(si.received_amount_paise, 0) ELSE 0 END), 0) as "31_60",
+          COALESCE(SUM(CASE WHEN CURRENT_DATE - CAST(si.posting_date AS DATE) > 60 AND CURRENT_DATE - CAST(si.posting_date AS DATE) <= 90 THEN si.total_amount_paise - COALESCE(si.received_amount_paise, 0) ELSE 0 END), 0) as "61_90",
+          COALESCE(SUM(CASE WHEN CURRENT_DATE - CAST(si.posting_date AS DATE) > 90 THEN si.total_amount_paise - COALESCE(si.received_amount_paise, 0) ELSE 0 END), 0) as "90_plus"
+        FROM customers c
+        LEFT JOIN sales_invoices si ON c.id = si.customer_id AND si.company_id = ${companyId} AND si.status = 'approved'
+        WHERE c.company_id = ${companyId}
+        GROUP BY c.id, c.name
+        ORDER BY c.name ASC
       `;
-      const result = await db.execute(query);
-      return result;
+      const result: any = await db.execute(query);
+      return Array.isArray(result) ? result : (result.rows ?? []);
     } catch (error) {
       request.log.error(error);
       reply.status(500).send({ error: 'Failed to fetch AR Aging' });
@@ -197,26 +256,26 @@ const reportsRoutes: FastifyPluginAsync = async (fastify) => {
   // ─── AP AGING ────────────────────────────────────────────────────────
   fastify.get('/ap-aging', async (request, reply) => {
     try {
+      const { companyId } = tenant(request);
       const query = sql`
-        SELECT 
+        SELECT
+          s.id as party_id,
           s.name as supplier_name,
-          jel.party_id,
-          SUM(jel.credit_amount_paise) as total_credit,
-          SUM(jel.debit_amount_paise) as total_debit,
-          SUM(jel.credit_amount_paise - jel.debit_amount_paise) as outstanding,
-          SUM(CASE WHEN current_date - je.posting_date <= 30 THEN jel.credit_amount_paise - jel.debit_amount_paise ELSE 0 END) as "0_30",
-          SUM(CASE WHEN current_date - je.posting_date > 30 AND current_date - je.posting_date <= 60 THEN jel.credit_amount_paise - jel.debit_amount_paise ELSE 0 END) as "31_60",
-          SUM(CASE WHEN current_date - je.posting_date > 60 AND current_date - je.posting_date <= 90 THEN jel.credit_amount_paise - jel.debit_amount_paise ELSE 0 END) as "61_90",
-          SUM(CASE WHEN current_date - je.posting_date > 90 THEN jel.credit_amount_paise - jel.debit_amount_paise ELSE 0 END) as "90_plus"
-        FROM journal_entry_lines jel
-        JOIN journal_entries je ON jel.journal_entry_id = je.id
-        JOIN suppliers s ON jel.party_id = s.id
-        WHERE jel.party_type = 'supplier'
-        GROUP BY s.name, jel.party_id
-        HAVING SUM(jel.credit_amount_paise - jel.debit_amount_paise) > 0
+          COALESCE(SUM(pi.total_amount_paise), 0) as total_credit,
+          COALESCE(SUM(COALESCE(pi.paid_amount_paise, 0)), 0) as total_debit,
+          COALESCE(SUM(pi.total_amount_paise - COALESCE(pi.paid_amount_paise, 0)), 0) as outstanding,
+          COALESCE(SUM(CASE WHEN CURRENT_DATE - CAST(pi.posting_date AS DATE) <= 30 THEN pi.total_amount_paise - COALESCE(pi.paid_amount_paise, 0) ELSE 0 END), 0) as "0_30",
+          COALESCE(SUM(CASE WHEN CURRENT_DATE - CAST(pi.posting_date AS DATE) > 30 AND CURRENT_DATE - CAST(pi.posting_date AS DATE) <= 60 THEN pi.total_amount_paise - COALESCE(pi.paid_amount_paise, 0) ELSE 0 END), 0) as "31_60",
+          COALESCE(SUM(CASE WHEN CURRENT_DATE - CAST(pi.posting_date AS DATE) > 60 AND CURRENT_DATE - CAST(pi.posting_date AS DATE) <= 90 THEN pi.total_amount_paise - COALESCE(pi.paid_amount_paise, 0) ELSE 0 END), 0) as "61_90",
+          COALESCE(SUM(CASE WHEN CURRENT_DATE - CAST(pi.posting_date AS DATE) > 90 THEN pi.total_amount_paise - COALESCE(pi.paid_amount_paise, 0) ELSE 0 END), 0) as "90_plus"
+        FROM suppliers s
+        LEFT JOIN purchase_invoices pi ON s.id = pi.supplier_id AND pi.company_id = ${companyId} AND pi.status = 'approved'
+        WHERE s.company_id = ${companyId}
+        GROUP BY s.id, s.name
+        ORDER BY s.name ASC
       `;
-      const result = await db.execute(query);
-      return result;
+      const result: any = await db.execute(query);
+      return Array.isArray(result) ? result : (result.rows ?? []);
     } catch (error) {
       request.log.error(error);
       reply.status(500).send({ error: 'Failed to fetch AP Aging' });
@@ -226,8 +285,9 @@ const reportsRoutes: FastifyPluginAsync = async (fastify) => {
   // ─── SALES REPORT ────────────────────────────────────────────────────────
   fastify.get('/sales', async (request, reply) => {
     try {
+      const { companyId } = tenant(request);
       const query = sql`
-        SELECT 
+        SELECT
           si.document_number,
           si.posting_date,
           c.name as customer_name,
@@ -237,10 +297,11 @@ const reportsRoutes: FastifyPluginAsync = async (fastify) => {
           si.payment_status
         FROM sales_invoices si
         JOIN customers c ON si.customer_id = c.id
+        WHERE si.company_id = ${companyId}
         ORDER BY si.posting_date DESC
       `;
-      const result = await db.execute(query);
-      return result;
+      const result: any = await db.execute(query);
+      return Array.isArray(result) ? result : (result.rows ?? []);
     } catch (error) {
       request.log.error(error);
       reply.status(500).send({ error: 'Failed to fetch Sales Report' });
@@ -250,8 +311,9 @@ const reportsRoutes: FastifyPluginAsync = async (fastify) => {
   // ─── PURCHASES REPORT ────────────────────────────────────────────────────────
   fastify.get('/purchases', async (request, reply) => {
     try {
+      const { companyId } = tenant(request);
       const query = sql`
-        SELECT 
+        SELECT
           pi.document_number,
           pi.posting_date,
           s.name as supplier_name,
@@ -262,10 +324,11 @@ const reportsRoutes: FastifyPluginAsync = async (fastify) => {
           pi.payment_status
         FROM purchase_invoices pi
         JOIN suppliers s ON pi.supplier_id = s.id
+        WHERE pi.company_id = ${companyId}
         ORDER BY pi.posting_date DESC
       `;
-      const result = await db.execute(query);
-      return result;
+      const result: any = await db.execute(query);
+      return Array.isArray(result) ? result : (result.rows ?? []);
     } catch (error) {
       request.log.error(error);
       reply.status(500).send({ error: 'Failed to fetch Purchase Report' });

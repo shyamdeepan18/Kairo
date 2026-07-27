@@ -9,8 +9,7 @@ const isoDate = z.string().min(8);
 
 // ─── Customer ───────────────────────────────────────────────────────────────
 
-export const customerCreateSchema = z.object({
-  companyId: uuid,
+const customerFields = z.object({
   customerCode: z.string().min(1).max(50),
   name: z.string().min(1).max(255),
   legalName: z.string().max(255).optional(),
@@ -29,10 +28,10 @@ export const customerCreateSchema = z.object({
   tcsApplicable: z.boolean().default(false),
 });
 
-export const customerUpdateSchema = customerCreateSchema.partial().omit({ companyId: true });
+export const customerCreateSchema = customerFields.strict();
+export const customerUpdateSchema = customerFields.partial().strict();
 
 export const customerAddressCreateSchema = z.object({
-  companyId: uuid,
   customerId: uuid,
   addressType: z.enum(['billing', 'shipping', 'both']).default('both'),
   label: z.string().max(100).optional(),
@@ -45,7 +44,7 @@ export const customerAddressCreateSchema = z.object({
   contactPerson: z.string().max(255).optional(),
   phone: z.string().max(20).optional(),
   isDefault: z.boolean().default(false),
-});
+}).strict();
 
 // ─── Generic priced line ────────────────────────────────────────────────────
 
@@ -62,12 +61,12 @@ const docLineSchema = z.object({
   warehouseId: uuid.optional(),
 });
 
+// companyId is derived from the trusted tenant context, never a client input.
 const docHeaderBase = z.object({
-  companyId: uuid,
   plantId: uuid,
   postingDate: isoDate,
   remarks: z.string().optional(),
-});
+}).strict();
 
 const addressRefs = {
   billingAddressId: uuid.optional(),

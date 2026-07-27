@@ -36,6 +36,20 @@
       "when": 1784933266478,
       "tag": "0004_cuddly_shriek",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1785098149891,
+      "tag": "0005_marvelous_ozymandias",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1785174540783,
+      "tag": "0006_approval_action_unique_vote",
+      "breakpoints": true
     }
   ]
 }

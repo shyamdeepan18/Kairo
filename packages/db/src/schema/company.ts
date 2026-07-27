@@ -1,6 +1,6 @@
 import {
   pgTable, varchar, text, boolean,
-  timestamp, uuid, index, pgEnum, numeric,
+  timestamp, uuid, index, uniqueIndex, pgEnum, numeric,
 } from 'drizzle-orm/pg-core';
 import { sql, relations } from 'drizzle-orm';
 import { users } from './auth.js';
@@ -19,6 +19,9 @@ export const companyUsers = pgTable('company_users', {
 }, (t) => ({
   companyIdx: index('company_users_company_id_idx').on(t.companyId),
   userIdx: index('company_users_user_id_idx').on(t.userId),
+  // One membership row per (company, user) — used as the authoritative source
+  // for tenant context selection. Prevents duplicate memberships.
+  companyUserUq: uniqueIndex('company_users_company_user_uq').on(t.companyId, t.userId),
 }));
 
 // ─── companies ───────────────────────────────────────────────────────────────

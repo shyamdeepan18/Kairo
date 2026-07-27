@@ -58,17 +58,20 @@ export type MfgAction = 'submit' | 'approve' | 'reject' | 'cancel';
 
 // ─── Generic helpers ────────────────────────────────────────────────────────
 
-const listDocs = <T>(path: string, companyId: string, params?: Record<string, unknown>) =>
-  api.get<Paginated<T>>(`${BASE}/${path}`, { params: { companyId, ...(params ?? {}) } }).then((r) => r.data);
+// NOTE: companyId is derived server-side from the session/JWT (tenant context)
+// and is no longer sent on the wire. The `_companyId` params are retained only
+// to avoid churning every call site; they are intentionally unused.
+const listDocs = <T>(path: string, _companyId: string, params?: Record<string, unknown>) =>
+  api.get<Paginated<T>>(`${BASE}/${path}`, { params: { ...(params ?? {}) } }).then((r) => r.data);
 
-const getDoc = <T = any>(path: string, companyId: string, id: string) =>
-  api.get<T>(`${BASE}/${path}/${id}`, { params: { companyId } }).then((r) => r.data);
+const getDoc = <T = any>(path: string, _companyId: string, id: string) =>
+  api.get<T>(`${BASE}/${path}/${id}`).then((r) => r.data);
 
 const createDoc = <T = any>(path: string, body: Record<string, unknown>) =>
   api.post<T>(`${BASE}/${path}`, body).then((r) => r.data);
 
-const act = (path: string, id: string, action: string, companyId: string, body?: Record<string, unknown>) =>
-  api.post(`${BASE}/${path}/${id}/${action}`, { companyId, ...(body ?? {}) }).then((r) => r.data);
+const act = (path: string, id: string, action: string, _companyId: string, body?: Record<string, unknown>) =>
+  api.post(`${BASE}/${path}/${id}/${action}`, { ...(body ?? {}) }).then((r) => r.data);
 
 // ─── Exported API ───────────────────────────────────────────────────────────
 

@@ -16,20 +16,15 @@ export const api = axios.create({
 });
 
 import { useAuthStore } from '../store/auth';
-import { usePlantStore } from '../store/plant';
 
-// ── Request interceptor: attach access token & plant context ─────────────
+// ── Request interceptor: attach access token ─────────────────────────────
+// Tenant context (company + plant) is bound to the JWT server-side via
+// POST /auth/select-context and read from request.user — the client no longer
+// sends x-company-id / x-plant-id headers (the server would ignore them anyway).
 api.interceptors.request.use((config) => {
   const token = useAuthStore.getState().accessToken;
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
-  }
-  const { company, plant } = usePlantStore.getState();
-  if (company?.id) {
-    config.headers['x-company-id'] = company.id;
-  }
-  if (plant?.id) {
-    config.headers['x-plant-id'] = plant.id;
   }
   return config;
 });
@@ -45,6 +40,13 @@ api.interceptors.response.use(
   (res) => res,
   async (error) => {
     const original = error.config;
+
+    if (error.response?.status === 409 && error.response?.data?.error === 'tenant_context_required') {
+      if (window.location.pathname !== '/select-company') {
+        window.location.href = '/select-company';
+      }
+      return Promise.reject(error);
+    }
 
     const shouldRetry =
       error.response?.status === 401 &&

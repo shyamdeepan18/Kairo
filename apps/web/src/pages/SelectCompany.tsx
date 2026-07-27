@@ -12,6 +12,7 @@ import {
 import { useAuthStore } from '../store/auth';
 import { useThemeStore } from '../store/theme';
 import { usePlantStore, type ErpCompany, type ErpPlant } from '../store/plant';
+import { authApi } from '../api/auth';
 import { companiesApi } from '../api/companies';
 
 const { Title, Text } = Typography;
@@ -20,15 +21,14 @@ type Step = 'company' | 'plant';
 
 export function SelectCompanyPage() {
   const navigate = useNavigate();
-  const { logout, user } = useAuthStore((s) => ({ logout: s.logout, user: s.user }));
+  const { logout, user, setAuth } = useAuthStore((s) => ({
+    logout: s.logout,
+    user: s.user,
+    setAuth: s.setAuth,
+  }));
   const { isDark } = useThemeStore();
   const { token: dt } = antTheme.useToken();
   const { setCompany, setPlant } = usePlantStore();
-
-  // System admin goes directly to the Admin Portal
-  useEffect(() => {
-    if (user?.isSystemAdmin) navigate('/admin', { replace: true });
-  }, [user, navigate]);
 
   const [step, setStep] = useState<Step>('company');
   const [companies, setCompanies] = useState<ErpCompany[]>([]);
@@ -65,11 +65,16 @@ export function SelectCompanyPage() {
     setLoading(true);
     setError(null);
     try {
+      const { accessToken } = await authApi.selectContext(company.id, null);
+      if (user) setAuth(user, accessToken);
+
       const list = await companiesApi.listPlants(company.id);
       setPlants(list);
 
       // If only one plant, skip selection and go straight to dashboard
       if (list.length === 1) {
+        const { accessToken: plantToken } = await authApi.selectContext(company.id, list[0].id);
+        if (user) setAuth(user, plantToken);
         setPlant(list[0]);
         navigate('/dashboard', { replace: true });
         return;
@@ -77,16 +82,28 @@ export function SelectCompanyPage() {
 
       setStep('plant');
     } catch (err: any) {
-      const msg = err?.response?.data?.error ?? 'Failed to load plants.';
+      const msg = err?.response?.data?.error ?? 'Failed to select company.';
       setError(msg);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSelectPlant = (plant: ErpPlant) => {
-    setPlant(plant);
-    navigate('/dashboard', { replace: true });
+  const handleSelectPlant = async (plant: ErpPlant) => {
+    if (selectedCompany) {
+      try {
+        setLoading(true);
+        const { accessToken } = await authApi.selectContext(selectedCompany.id, plant.id);
+        if (user) setAuth(user, accessToken);
+        setPlant(plant);
+        navigate('/dashboard', { replace: true });
+      } catch (err: any) {
+        const msg = err?.response?.data?.error ?? 'Failed to select plant.';
+        setError(msg);
+      } finally {
+        setLoading(false);
+      }
+    }
   };
 
   const handleBack = () => {

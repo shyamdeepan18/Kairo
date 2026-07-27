@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Table, Typography, Card, Space, DatePicker, message, Row, Col } from 'antd';
-import axios from 'axios';
+import { api } from '../../api/client';
 
 const { Title } = Typography;
 
@@ -25,9 +25,7 @@ const BalanceSheetReport: React.FC = () => {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const res = await axios.get('/api/reports/balance-sheet', {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-      });
+      const res = await api.get<BSRecord[]>('/reports/balance-sheet');
       setData(res.data);
     } catch (error) {
       console.error(error);

@@ -56,6 +56,7 @@ const PERMISSIONS = [
   { code: 'purchase.invoice.view',        module: 'purchase', documentType: 'invoice',      action: 'view',    label: 'View purchase invoices' },
   { code: 'purchase.invoice.create',      module: 'purchase', documentType: 'invoice',      action: 'create',  label: 'Create purchase invoices' },
   { code: 'purchase.invoice.approve',     module: 'purchase', documentType: 'invoice',      action: 'approve', label: 'Approve purchase invoices' },
+  { code: 'purchase.payment.view',        module: 'purchase', documentType: 'payment',      action: 'view',    label: 'View purchase payments' },
   { code: 'purchase.payment.create',      module: 'purchase', documentType: 'payment',      action: 'create',  label: 'Create purchase payments' },
   { code: 'purchase.payment.approve',     module: 'purchase', documentType: 'payment',      action: 'approve', label: 'Approve purchase payments' },
   { code: 'purchase.return.view',         module: 'purchase', documentType: 'return',       action: 'view',    label: 'View purchase returns' },

@@ -15,6 +15,7 @@ import type { ValuationEngine } from '../services/valuation-engine.js';
 import type { UomService } from '../services/uom-service.js';
 import type { ApprovalEngine } from '../services/approval-engine.js';
 import type { LicenseService } from '../services/license-service.js';
+import type { TenantContext } from '../middleware/tenant-context.js';
 
 // Extend JWT payload so request.user is typed everywhere
 declare module '@fastify/jwt' {
@@ -25,8 +26,24 @@ declare module '@fastify/jwt' {
       email: string;
       fullName: string;
       isSystemAdmin: boolean;
+      // Trusted active tenant context, bound by POST /api/auth/select-context.
+      // Absent on the initial login token — the client must select a company.
+      activeCompanyId?: string | null;
+      activePlantId?: string | null;
     };
-    user: AuthUser & { sessionId: string };
+    user: AuthUser & {
+      sessionId: string;
+      activeCompanyId?: string | null;
+      activePlantId?: string | null;
+    };
+  }
+}
+
+declare module 'fastify' {
+  interface FastifyRequest {
+    // Populated by resolveTenantContext from the trusted JWT/session state only.
+    // The ONLY tenant source business routes may read. Never from headers/body.
+    tenant?: TenantContext;
   }
 }
 

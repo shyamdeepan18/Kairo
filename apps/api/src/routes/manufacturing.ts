@@ -6,14 +6,18 @@ import {
   productionFormulas, formulaInputs, formulaOutputs, formulaOperations,
   productionOrders, productionOrderMaterials, productionOrderOutputs,
   productionOrderOperations, productionOrderCosts,
+  plants, warehouses,
 } from '@erp/db';
 import {
   workCenterCreateSchema, formulaCreateSchema, productionOrderCreateSchema,
   issueMaterialsSchema, recordOutputSchema, transitionSchema,
 } from '@erp/shared';
 import { authorize } from '../middleware/authorize.js';
-import { resolveCompany, companyId } from '../middleware/company-context.js';
+import { resolveTenantContext, tenant } from '../middleware/tenant-context.js';
+import { byTenantId } from '../db/tenant-query.js';
 import { requireModule } from '../middleware/require-module.js';
+import { stripServerOwned } from '../db/dto.js';
+import { assertOwned, assertAllOwned } from '../db/fk-ownership.js';
 import { fiscalPeriod, type PostingContext } from '../services/posting-engine.js';
 import {
   scaleFactor, explodeInputQty, allocateProductionCost, perUnitRate, computeVariance,
@@ -32,6 +36,10 @@ import type { DocumentStatus } from '../services/status-engine.js';
  *           outputs by the type-specific strategy.
  */
 export default async function manufacturingRoutes(app: FastifyInstance) {
+  // Authenticate at the group level FIRST so the module gate below sees the
+  // trusted JWT context (request.user.activeCompanyId) instead of client input.
+  // Individual routes still run authenticate + resolveTenantContext + authorize.
+  app.addHook('preHandler', app.authenticate);
   app.addHook('preHandler', requireModule('manufacturing'));   // company must have the manufacturing module licensed
   registerWorkCenters(app);
   registerFormulas(app);
@@ -69,7 +77,7 @@ async function applyTransition(
 }
 
 async function listHeaders(request: FastifyRequest, table: any) {
-  const cid = companyId(request);
+  const cid = tenant(request).companyId;
   const q = request.query as Record<string, unknown>;
   const { page, pageSize, limit, offset } = paginate(q);
   const filters = [eq(table.companyId, cid)];
@@ -83,11 +91,12 @@ function simpleTransition(
   app: FastifyInstance,
   cfg: { route: string; table: any; docType: string; to: DocumentStatus; perm: string }
 ) {
-  app.post(cfg.route, { preHandler: [app.authenticate, resolveCompany, authorize(cfg.perm)] }, async (request, reply) => {
+  app.post(cfg.route, { preHandler: [app.authenticate, resolveTenantContext, authorize(cfg.perm)] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const remarks = transitionSchema.safeParse(request.body ?? {}).data?.remarks;
-    const cid = companyId(request);
-    const [row] = await db.select().from(cfg.table).where(eq(cfg.table.id, id)).limit(1);
+    const cid = tenant(request).companyId;
+    // Scope to the caller's company so a foreign document can't be transitioned here.
+    const [row] = await db.select().from(cfg.table).where(byTenantId(cfg.table, id, cid)).limit(1);
     if (!row) return reply.code(404).send({ error: 'Document not found' });
 
     if (cfg.to === 'approved') {
@@ -116,13 +125,14 @@ function simpleTransition(
 
 function registerWorkCenters(app: FastifyInstance) {
   app.post('/work-centers', {
-    preHandler: [app.authenticate, resolveCompany, authorize('settings.company.edit')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('settings.company.edit')],
   }, async (request, reply) => {
-    const parsed = workCenterCreateSchema.safeParse(request.body);
+    const parsed = workCenterCreateSchema.safeParse(stripServerOwned(request.body));
     if (!parsed.success) return bad(reply, parsed);
     const d = parsed.data;
+    await assertOwned(plants, d.plantId, tenant(request).companyId, 'Plant');
     const [row] = await db.insert(workCenters).values({
-      companyId: d.companyId, plantId: d.plantId, code: d.code, name: d.name,
+      companyId: tenant(request).companyId, plantId: d.plantId, code: d.code, name: d.name,
       capacityMinsPerDay: d.capacityMinsPerDay, labourRatePaise: d.labourRatePaise,
       overheadRatePaise: d.overheadRatePaise, createdBy: userId(request),
     }).returning();
@@ -130,9 +140,9 @@ function registerWorkCenters(app: FastifyInstance) {
   });
 
   app.get('/work-centers', {
-    preHandler: [app.authenticate, resolveCompany, authorize('manufacturing.bom.view')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('manufacturing.bom.view')],
   }, async (request) => {
-    const cid = companyId(request);
+    const cid = tenant(request).companyId;
     const rows = await db.select().from(workCenters).where(eq(workCenters.companyId, cid)).orderBy(desc(workCenters.createdAt));
     return { data: rows, total: rows.length };
   });
@@ -146,14 +156,19 @@ function registerFormulas(app: FastifyInstance) {
   const DOC = 'manufacturing.bom';
 
   app.post('/formulas', {
-    preHandler: [app.authenticate, resolveCompany, authorize('manufacturing.bom.create')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('manufacturing.bom.create')],
   }, async (request, reply) => {
-    const parsed = formulaCreateSchema.safeParse(request.body);
+    const parsed = formulaCreateSchema.safeParse(stripServerOwned(request.body));
     if (!parsed.success) return bad(reply, parsed);
     const d = parsed.data;
+    const cid = tenant(request).companyId;
+    await Promise.all([
+      assertAllOwned(items, [...d.inputs.map((i) => i.itemId), ...d.outputs.map((o) => o.itemId)], cid, 'Item'),
+      assertAllOwned(workCenters, d.operations.map((op) => op.workCenterId), cid, 'Work center'),
+    ]);
     const created = await db.transaction(async (tx) => {
       const [f] = await tx.insert(productionFormulas).values({
-        companyId: d.companyId, code: d.code, version: d.version, name: d.name,
+        companyId: tenant(request).companyId, code: d.code, version: d.version, name: d.name,
         manufacturingType: d.manufacturingType, batchSize: d.batchSize.toString(), baseUom: d.baseUom,
         status: 'draft', effectiveFrom: d.effectiveFrom as any, effectiveTo: d.effectiveTo as any,
         remarks: d.remarks, createdBy: userId(request),
@@ -173,21 +188,22 @@ function registerFormulas(app: FastifyInstance) {
           setupMins: o.setupMins, runMinsPerUnit: o.runMinsPerUnit.toString(), overheadRatePaise: o.overheadRatePaise,
         })));
       }
-      await app.auditEngine.logCreate({ companyId: d.companyId, documentType: DOC, documentId: f.id, documentNumber: f.code, performedBy: userId(request) }, f, { tx });
+      await app.auditEngine.logCreate({ companyId: tenant(request).companyId, documentType: DOC, documentId: f.id, documentNumber: f.code, performedBy: userId(request) }, f, { tx });
       return f;
     });
     return reply.code(201).send(created);
   });
 
   app.get('/formulas', {
-    preHandler: [app.authenticate, resolveCompany, authorize('manufacturing.bom.view')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('manufacturing.bom.view')],
   }, async (request) => listHeaders(request, productionFormulas));
 
   app.get('/formulas/:id', {
-    preHandler: [app.authenticate, resolveCompany, authorize('manufacturing.bom.view')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('manufacturing.bom.view')],
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const [f] = await db.select().from(productionFormulas).where(eq(productionFormulas.id, id)).limit(1);
+    const [f] = await db.select().from(productionFormulas)
+      .where(byTenantId(productionFormulas, id, tenant(request).companyId)).limit(1);
     if (!f) return reply.code(404).send({ error: 'Formula not found' });
     const [inputs, outputs, operations] = await Promise.all([
       db.select().from(formulaInputs).where(eq(formulaInputs.formulaId, id)),
@@ -212,13 +228,20 @@ function registerOrders(app: FastifyInstance) {
 
   // Create — explode the formula by scaleFactor into materials / outputs / operations.
   app.post('/orders', {
-    preHandler: [app.authenticate, resolveCompany, authorize('manufacturing.order.create', { plantFrom: 'body.plantId' })],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('manufacturing.order.create', { plantFrom: 'body.plantId' })],
   }, async (request, reply) => {
-    const parsed = productionOrderCreateSchema.safeParse(request.body);
+    const parsed = productionOrderCreateSchema.safeParse(stripServerOwned(request.body));
     if (!parsed.success) return bad(reply, parsed);
     const d = parsed.data;
+    await Promise.all([
+      assertOwned(plants, d.plantId, tenant(request).companyId, 'Plant'),
+      assertOwned(warehouses, d.targetWarehouseId, tenant(request).companyId, 'Target warehouse'),
+      assertOwned(warehouses, d.sourceWarehouseId, tenant(request).companyId, 'Source warehouse'),
+    ]);
 
-    const [formula] = await db.select().from(productionFormulas).where(eq(productionFormulas.id, d.formulaId)).limit(1);
+    // formulaId ownership is enforced by the tenant-scoped fetch below.
+    const [formula] = await db.select().from(productionFormulas)
+      .where(byTenantId(productionFormulas, d.formulaId, tenant(request).companyId)).limit(1);
     if (!formula) return reply.code(404).send({ error: 'Formula not found' });
     if (formula.status !== 'approved') return reply.code(409).send({ error: 'Formula must be approved before use' });
 
@@ -233,9 +256,9 @@ function registerOrders(app: FastifyInstance) {
     const { fiscalYear } = fiscalPeriod(new Date(d.postingDate));
 
     const created = await db.transaction(async (tx) => {
-      const documentNumber = await app.numberSeriesService.next(tx, d.companyId, DOC, { fiscalYear, plantId: d.plantId });
+      const documentNumber = await app.numberSeriesService.next(tx, tenant(request).companyId, DOC, { fiscalYear, plantId: d.plantId });
       const [order] = await tx.insert(productionOrders).values({
-        companyId: d.companyId, plantId: d.plantId, documentNumber, status: 'draft', fiscalYear,
+        companyId: tenant(request).companyId, plantId: d.plantId, documentNumber, status: 'draft', fiscalYear,
         postingDate: d.postingDate as any, formulaId: formula.id, manufacturingType: formula.manufacturingType,
         plannedQty: d.plannedQty.toString(), batchSize: formula.batchSize, scaleFactor: factor.toString(),
         targetWarehouseId: d.targetWarehouseId, sourceWarehouseId: d.sourceWarehouseId,
@@ -260,19 +283,20 @@ function registerOrders(app: FastifyInstance) {
         })));
       }
       await tx.insert(productionOrderCosts).values({ orderId: order.id });
-      await app.auditEngine.logCreate({ companyId: d.companyId, documentType: DOC, documentId: order.id, documentNumber, performedBy: userId(request) }, order, { tx });
+      await app.auditEngine.logCreate({ companyId: tenant(request).companyId, documentType: DOC, documentId: order.id, documentNumber, performedBy: userId(request) }, order, { tx });
       return order;
     });
     return reply.code(201).send(created);
   });
 
-  app.get('/orders', { preHandler: [app.authenticate, resolveCompany, authorize('manufacturing.order.view')] },
+  app.get('/orders', { preHandler: [app.authenticate, resolveTenantContext, authorize('manufacturing.order.view')] },
     async (request) => listHeaders(request, productionOrders));
 
-  app.get('/orders/:id', { preHandler: [app.authenticate, resolveCompany, authorize('manufacturing.order.view')] },
+  app.get('/orders/:id', { preHandler: [app.authenticate, resolveTenantContext, authorize('manufacturing.order.view')] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const [order] = await db.select().from(productionOrders).where(eq(productionOrders.id, id)).limit(1);
+      const [order] = await db.select().from(productionOrders)
+        .where(byTenantId(productionOrders, id, tenant(request).companyId)).limit(1);
       if (!order) return reply.code(404).send({ error: 'Order not found' });
       const [materials, outputs, operations, costs] = await Promise.all([
         db.select().from(productionOrderMaterials).where(eq(productionOrderMaterials.orderId, id)),
@@ -296,17 +320,21 @@ function registerOrders(app: FastifyInstance) {
 
 function registerIssue(app: FastifyInstance) {
   app.post('/orders/:id/issue', {
-    preHandler: [app.authenticate, resolveCompany, authorize('manufacturing.order.issue')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('manufacturing.order.issue')],
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const parsed = issueMaterialsSchema.safeParse(request.body);
+    const parsed = issueMaterialsSchema.safeParse(stripServerOwned(request.body));
     if (!parsed.success) return bad(reply, parsed);
     const d = parsed.data;
-    const cid = companyId(request);
+    const cid = tenant(request).companyId;
+    await Promise.all([
+      assertAllOwned(items, d.lines.map((l) => l.itemId), cid, 'Item'),
+      assertAllOwned(warehouses, d.lines.map((l) => l.warehouseId), cid, 'Warehouse'),
+    ]);
     const uid = userId(request);
     const bypassSod = await app.permissionService.check(uid, 'system.bypass_sod', cid);
 
-    const [order] = await db.select().from(productionOrders).where(eq(productionOrders.id, id)).limit(1);
+    const [order] = await db.select().from(productionOrders).where(byTenantId(productionOrders, id, cid)).limit(1);
     if (!order) return reply.code(404).send({ error: 'Order not found' });
     if (order.status !== 'approved') return reply.code(409).send({ error: `Order must be approved to issue (is '${order.status}')` });
 
@@ -380,17 +408,21 @@ function registerIssue(app: FastifyInstance) {
 
 function registerReceive(app: FastifyInstance) {
   app.post('/orders/:id/receive', {
-    preHandler: [app.authenticate, resolveCompany, authorize('manufacturing.order.issue')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('manufacturing.order.issue')],
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const parsed = recordOutputSchema.safeParse(request.body);
+    const parsed = recordOutputSchema.safeParse(stripServerOwned(request.body));
     if (!parsed.success) return bad(reply, parsed);
     const d = parsed.data;
-    const cid = companyId(request);
+    const cid = tenant(request).companyId;
+    await Promise.all([
+      assertAllOwned(items, d.outputs.map((o) => o.itemId), cid, 'Item'),
+      assertAllOwned(warehouses, d.outputs.map((o) => o.warehouseId), cid, 'Warehouse'),
+    ]);
     const uid = userId(request);
     const bypassSod = await app.permissionService.check(uid, 'system.bypass_sod', cid);
 
-    const [order] = await db.select().from(productionOrders).where(eq(productionOrders.id, id)).limit(1);
+    const [order] = await db.select().from(productionOrders).where(byTenantId(productionOrders, id, cid)).limit(1);
     if (!order) return reply.code(404).send({ error: 'Order not found' });
     if (order.status !== 'approved') return reply.code(409).send({ error: `Order must be approved to receive (is '${order.status}')` });
 
@@ -490,15 +522,15 @@ function registerReceive(app: FastifyInstance) {
 
 function registerClose(app: FastifyInstance) {
   app.post('/orders/:id/close', {
-    preHandler: [app.authenticate, resolveCompany, authorize('manufacturing.order.approve')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('manufacturing.order.approve')],
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const remarks = transitionSchema.safeParse(request.body ?? {}).data?.remarks;
-    const cid = companyId(request);
+    const cid = tenant(request).companyId;
     const uid = userId(request);
     const bypassSod = await app.permissionService.check(uid, 'system.bypass_sod', cid);
 
-    const [order] = await db.select().from(productionOrders).where(eq(productionOrders.id, id)).limit(1);
+    const [order] = await db.select().from(productionOrders).where(byTenantId(productionOrders, id, cid)).limit(1);
     if (!order) return reply.code(404).send({ error: 'Order not found' });
     if (order.status !== 'approved') return reply.code(409).send({ error: `Order must be approved to close (is '${order.status}')` });
 
@@ -546,11 +578,11 @@ function registerClose(app: FastifyInstance) {
 
 function registerOperations(app: FastifyInstance) {
   app.post('/orders/:id/operations/:seq/complete', {
-    preHandler: [app.authenticate, resolveCompany, authorize('manufacturing.order.issue')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('manufacturing.order.issue')],
   }, async (request, reply) => {
     const { id, seq } = request.params as { id: string, seq: string };
     const { actualMins } = request.body as { actualMins: number };
-    const cid = companyId(request);
+    const cid = tenant(request).companyId;
     const uid = userId(request);
     const bypassSod = await app.permissionService.check(uid, 'system.bypass_sod', cid);
 
@@ -558,7 +590,7 @@ function registerOperations(app: FastifyInstance) {
       return reply.code(400).send({ error: 'Valid actualMins required' });
     }
 
-    const [order] = await db.select().from(productionOrders).where(eq(productionOrders.id, id)).limit(1);
+    const [order] = await db.select().from(productionOrders).where(byTenantId(productionOrders, id, cid)).limit(1);
     if (!order) return reply.code(404).send({ error: 'Order not found' });
     if (order.status !== 'approved') return reply.code(409).send({ error: 'Order must be approved' });
 
@@ -570,7 +602,7 @@ function registerOperations(app: FastifyInstance) {
     let labourRatePaise = 0;
     let overheadRatePaise = 0;
     if (op.workCenterId) {
-       const [wc] = await db.select().from(workCenters).where(eq(workCenters.id, op.workCenterId)).limit(1);
+       const [wc] = await db.select().from(workCenters).where(byTenantId(workCenters, op.workCenterId, cid)).limit(1);
        if (wc) {
           labourRatePaise = wc.labourRatePaise;
           overheadRatePaise = op.overheadRatePaise > 0 ? op.overheadRatePaise : wc.overheadRatePaise;

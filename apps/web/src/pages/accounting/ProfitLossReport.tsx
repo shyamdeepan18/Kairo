@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Table, Typography, Card, Space, DatePicker, message } from 'antd';
-import axios from 'axios';
+import { api } from '../../api/client';
 
 const { Title, Text } = Typography;
 const { RangePicker } = DatePicker;
@@ -26,9 +26,7 @@ const ProfitLossReport: React.FC = () => {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const res = await axios.get('/api/reports/profit-loss', {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-      });
+      const res = await api.get<PLRecord[]>('/reports/profit-loss');
       setData(res.data);
     } catch (error) {
       console.error(error);

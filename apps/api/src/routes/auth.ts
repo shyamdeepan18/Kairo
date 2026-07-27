@@ -2,9 +2,13 @@ import type { FastifyInstance } from 'fastify';
 import { eq, and, gt, or, sql, inArray } from 'drizzle-orm';
 import * as argon2 from 'argon2';
 import { randomBytes } from 'crypto';
-import { db, users, sessions, companyLicense, userRoles } from '@erp/db';
+import {
+  db, users, sessions, companyLicense, userRoles,
+  companies, plants, companyUsers,
+} from '@erp/db';
 import { loginSchema } from '@erp/shared';
 import { config } from '../config.js';
+import type { PermissionService } from '../services/permissions.js';
 
 /**
  * Auth routes — all stateless JWT-based with httpOnly refresh token cookie.
@@ -28,15 +32,14 @@ export default async function authRoutes(app: FastifyInstance) {
     const identifier = email.trim().toLowerCase();
 
     // Check if the identifier is a UUID (User ID)
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    const isUuid = uuidRegex.test(identifier);
+    const identifierIsUuid = isUuid(identifier);
 
     const [user] = await db
       .select()
       .from(users)
       .where(
-        isUuid 
-          ? eq(users.id, identifier) 
+        identifierIsUuid
+          ? eq(users.id, identifier)
           : or(eq(users.email, identifier), eq(sql`LOWER(${users.fullName})`, identifier))
       )
       .limit(1);
@@ -161,6 +164,8 @@ export default async function authRoutes(app: FastifyInstance) {
         id: sessions.id,
         userId: sessions.userId,
         expiresAt: sessions.expiresAt,
+        activeCompanyId: sessions.activeCompanyId,
+        activePlantId: sessions.activePlantId,
       })
       .from(sessions)
       .where(and(eq(sessions.refreshToken, token), gt(sessions.expiresAt, now)))
@@ -197,6 +202,10 @@ export default async function authRoutes(app: FastifyInstance) {
       email: user.email,
       fullName: user.fullName,
       isSystemAdmin: user.isSystemAdmin,
+      // Preserve the active tenant context across refresh so the client is not
+      // forced to re-select a company on every token rotation.
+      activeCompanyId: session.activeCompanyId,
+      activePlantId: session.activePlantId,
     });
 
     return reply
@@ -298,9 +307,153 @@ export default async function authRoutes(app: FastifyInstance) {
       return reply.send({ permissions: Array.from(effectiveSet) });
     },
   );
+
+  // ── GET /api/auth/context-options ──────────────────────────────────────────
+  // Companies the authenticated user may select as their active tenant context.
+  // A user may belong to several companies; the login token carries none, so the
+  // client fetches the options here and then binds one via /select-context.
+  app.get('/context-options', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const user = request.user!;
+
+    // System admins may operate on any active company; everyone else only on the
+    // companies they are a member of (company_users, backfilled from user_roles).
+    const rows = user.isSystemAdmin
+      ? await db
+          .select({ id: companies.id, name: companies.name })
+          .from(companies)
+          .where(eq(companies.isActive, true))
+          .orderBy(companies.name)
+      : await db
+          .selectDistinct({ id: companies.id, name: companies.name })
+          .from(companyUsers)
+          .innerJoin(companies, eq(companyUsers.companyId, companies.id))
+          .where(
+            and(
+              eq(companyUsers.userId, user.id),
+              eq(companyUsers.isActive, true),
+              eq(companies.isActive, true),
+            ),
+          )
+          .orderBy(companies.name);
+
+    return reply.send({ companies: rows });
+  });
+
+  // ── POST /api/auth/select-context ──────────────────────────────────────────
+  // The client requests a company (and optional plant). The server VALIDATES the
+  // selection, persists it on the session, and returns a new access token that
+  // carries the validated active context. This is the only way tenant context is
+  // ever bound — downstream routes never trust a client-supplied company id.
+  app.post<{ Body: { companyId?: string; plantId?: string | null } }>(
+    '/select-context',
+    { preHandler: [app.authenticate] },
+    async (request, reply) => {
+      const user = request.user!;
+      const { companyId, plantId } = request.body ?? {};
+
+      if (!companyId || !isUuid(companyId)) {
+        return reply.code(400).send({ error: 'A valid companyId is required' });
+      }
+      if (plantId != null && !isUuid(plantId)) {
+        return reply.code(400).send({ error: 'plantId must be a valid id' });
+      }
+
+      // 1. Company must exist and be active.
+      const [company] = await db
+        .select({ id: companies.id, name: companies.name })
+        .from(companies)
+        .where(and(eq(companies.id, companyId), eq(companies.isActive, true)))
+        .limit(1);
+      if (!company) {
+        return reply.code(404).send({ error: 'Company not found or inactive' });
+      }
+
+      // 2. User must be a member of the company. System admins may select any.
+      if (!user.isSystemAdmin) {
+        const [membership] = await db
+          .select({ id: companyUsers.id })
+          .from(companyUsers)
+          .where(
+            and(
+              eq(companyUsers.companyId, companyId),
+              eq(companyUsers.userId, user.id),
+              eq(companyUsers.isActive, true),
+            ),
+          )
+          .limit(1);
+
+        let isMember = !!membership;
+        if (!isMember) {
+          // Fallback for any membership not yet backfilled into company_users.
+          const [roleRow] = await db
+            .select({ id: userRoles.id })
+            .from(userRoles)
+            .where(and(eq(userRoles.companyId, companyId), eq(userRoles.userId, user.id)))
+            .limit(1);
+          isMember = !!roleRow;
+        }
+        if (!isMember) {
+          return reply.code(403).send({ error: 'You are not a member of this company' });
+        }
+      }
+
+      // 3. Optional plant must belong to the company and be accessible.
+      let resolvedPlantId: string | null = null;
+      if (plantId) {
+        const [plant] = await db
+          .select({ id: plants.id })
+          .from(plants)
+          .where(
+            and(
+              eq(plants.id, plantId),
+              eq(plants.companyId, companyId),
+              eq(plants.isActive, true),
+            ),
+          )
+          .limit(1);
+        if (!plant) {
+          return reply.code(404).send({ error: 'Plant not found in this company' });
+        }
+        if (!user.isSystemAdmin) {
+          const svc = (app as any).permissionService as PermissionService | undefined;
+          if (svc && !(await svc.hasPlantAccess(user.id, plantId))) {
+            return reply.code(403).send({ error: 'No access to this plant' });
+          }
+        }
+        resolvedPlantId = plantId;
+      }
+
+      // 4. Persist the validated context on the session (source of truth).
+      await db
+        .update(sessions)
+        .set({ activeCompanyId: companyId, activePlantId: resolvedPlantId })
+        .where(eq(sessions.id, user.sessionId));
+
+      // 5. Issue a fresh access token carrying the validated active context.
+      const accessToken = app.jwt.sign({
+        sub: user.id,
+        sessionId: user.sessionId,
+        email: user.email,
+        fullName: user.fullName,
+        isSystemAdmin: user.isSystemAdmin,
+        activeCompanyId: companyId,
+        activePlantId: resolvedPlantId,
+      });
+
+      return reply.send({
+        accessToken,
+        context: { companyId, companyName: company.name, plantId: resolvedPlantId },
+      });
+    },
+  );
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isUuid(v: string): boolean {
+  return UUID_RE.test(v);
+}
 
 function cookieOptions(expires: Date, secure: boolean) {
   return {

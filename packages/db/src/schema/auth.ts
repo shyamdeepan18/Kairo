@@ -36,6 +36,16 @@ export const sessions = pgTable('sessions', {
   ipAddress: varchar('ip_address', { length: 45 }),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+
+  // ── Trusted active tenant context ──────────────────────────────────────────
+  // A user may belong to several companies, so the login JWT carries no company.
+  // The company/plant a session is currently operating on is chosen once via
+  // POST /api/auth/select-context, validated server-side, and persisted here.
+  // This is the ONLY authoritative source of tenant context — never headers/body.
+  // Plain uuid columns (FK constraints added in migration) to avoid a circular
+  // import with ./company.js, mirroring companySettings.defaultTaxCodeId.
+  activeCompanyId: uuid('active_company_id'),
+  activePlantId: uuid('active_plant_id'),
 }, (t) => ({
   userIdx:  index('sessions_user_id_idx').on(t.userId),
   tokenIdx: index('sessions_refresh_token_idx').on(t.refreshToken),

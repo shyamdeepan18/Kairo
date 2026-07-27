@@ -29,6 +29,7 @@ import { useAuthStore } from '../store/auth';
 import { useThemeStore } from '../store/theme';
 import { usePlantStore } from '../store/plant';
 import { usePermissionStore } from '../store/permission';
+import { authApi } from '../api/auth';
 import { ChangePasswordModal } from '../components/ChangePasswordModal';
 import { AccessDenied } from '../components/AccessDenied';
 
@@ -69,13 +70,13 @@ const NAV_ITEMS: NavItem[] = [
     key: 'purchase',
     icon: <ShoppingCartOutlined />,
     label: 'Purchase',
-    perms: ['purchase.requisition.view', 'purchase.po.view', 'purchase.grn.view', 'purchase.invoice.view', 'purchase.payment.create'],
+    perms: ['purchase.requisition.view', 'purchase.po.view', 'purchase.grn.view', 'purchase.invoice.view', 'purchase.payment.view', 'purchase.payment.create'],
     children: [
       { key: '/purchase/requisitions', label: 'Requisitions', perms: ['purchase.requisition.view'] },
       { key: '/purchase/orders',       label: 'Purchase Orders', perms: ['purchase.po.view'] },
       { key: '/purchase/grn',          label: 'GRN', perms: ['purchase.grn.view'] },
       { key: '/purchase/invoices',     label: 'Invoices', perms: ['purchase.invoice.view'] },
-      { key: '/purchase/payments',     label: 'Payments', perms: ['purchase.payment.create'] },
+      { key: '/purchase/payments',     label: 'Payments', perms: ['purchase.payment.view', 'purchase.payment.create'] },
     ],
   },
   {
@@ -187,9 +188,19 @@ export function AppShell() {
 
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
+  const setAuth = useAuthStore((s) => s.setAuth);
   const { isDark, toggle: toggleTheme } = useThemeStore();
   const { company, plant } = usePlantStore();
   const { permissions, fetchPermissions, hasAnyPermission } = usePermissionStore();
+
+  // Sync server session context and access token whenever company or plant changes
+  useEffect(() => {
+    if (company?.id) {
+      authApi.selectContext(company.id, plant?.id ?? null).then(({ accessToken }) => {
+        if (user) setAuth(user, accessToken);
+      }).catch(() => {});
+    }
+  }, [company?.id, plant?.id, user, setAuth]);
 
   // Fetch permissions whenever company or plant changes
   useEffect(() => {

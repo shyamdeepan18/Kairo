@@ -56,11 +56,28 @@ export default async function companyRoutes(app: FastifyInstance) {
   );
 
   // ── GET /api/companies/:companyId/plants ──────────────────────────────────
+  // Part of the context-selection flow (runs before a tenant context is bound),
+  // so it can't use resolveTenantContext. Instead it verifies the caller is a
+  // member of the requested company (or a system admin) before listing plants —
+  // otherwise any user could enumerate another company's plants.
   app.get(
     '/:companyId/plants',
     { preHandler: [app.authenticate] },
-    async (req) => {
+    async (req, reply) => {
       const { companyId } = req.params as { companyId: string };
+      const userId = (req.user as { id: string }).id;
+      const isSystemAdmin = (req.user as any).isSystemAdmin;
+
+      if (!isSystemAdmin) {
+        const [membership] = await db
+          .select({ id: userRoles.id })
+          .from(userRoles)
+          .where(and(eq(userRoles.userId, userId), eq(userRoles.companyId, companyId)))
+          .limit(1);
+        if (!membership) {
+          return reply.code(403).send({ error: 'You are not a member of this company' });
+        }
+      }
 
       const list = await db
         .select({

@@ -100,7 +100,12 @@ export const approvalActions = pgTable(
     performedAt: timestamp('performed_at', { withTimezone: true }).defaultNow().notNull(),
     remarks: text('remarks'),
   },
-  (t) => ({ requestIdx: index('approval_actions_request_idx').on(t.requestId) })
+  (t) => ({
+    requestIdx: index('approval_actions_request_idx').on(t.requestId),
+    // One vote per approver per level — makes N-of-M count distinct approvers and
+    // blocks a single user from satisfying a multi-approval level by voting twice.
+    oneVotePerApprover: unique('approval_actions_request_level_user_uq').on(t.requestId, t.level, t.performedBy),
+  })
 );
 
 export type ApprovalWorkflow = typeof approvalWorkflows.$inferSelect;

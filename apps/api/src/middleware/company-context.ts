@@ -1,6 +1,12 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 
 /**
+ * @deprecated SECURITY: this trusts a client-supplied company id (params/body/
+ * query/header) and must NOT be used on business routes. Replaced by
+ * resolveTenantContext (middleware/tenant-context.ts), which reads the active
+ * company only from the server-validated JWT/session. All business routes have
+ * been migrated. Kept only so legacy dev scripts still compile; do not re-add.
+ *
  * resolveCompany — preHandler that resolves the active company for the request
  * and stamps it on `request.companyId`, where authorize() and route handlers
  * read it from.

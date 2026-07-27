@@ -24,6 +24,27 @@ export interface JwtPayload {
   email: string;
   fullName: string;
   isSystemAdmin: boolean;
+  activeCompanyId?: string;
+  activePlantId?: string | null;
   iat: number;
   exp: number;
 }
+
+export interface ContextOption {
+  id: string;
+  name: string;
+}
+
+export interface ContextOptionsResponse {
+  companies: ContextOption[];
+}
+
+export interface SelectContextResponse {
+  accessToken: string;
+  context: {
+    companyId: string;
+    companyName: string;
+    plantId: string | null;
+  };
+}
+

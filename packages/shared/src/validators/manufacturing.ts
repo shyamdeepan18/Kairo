@@ -7,20 +7,19 @@ const isoDate = z.string().min(8);
 
 // ─── Work center ──────────────────────────────────────────────────────────
 
+// companyId is derived from the trusted tenant context, never a client input.
 export const workCenterCreateSchema = z.object({
-  companyId: uuid,
   plantId: uuid.optional(),
   code: z.string().min(1).max(30),
   name: z.string().min(1).max(255),
   capacityMinsPerDay: z.number().int().nonnegative().default(0),
   labourRatePaise: paisePos.default(0),
   overheadRatePaise: paisePos.default(0),
-});
+}).strict();
 
 // ─── Formula (BOM / recipe) ─────────────────────────────────────────────────
 
 export const formulaCreateSchema = z.object({
-  companyId: uuid,
   code: z.string().min(1).max(50),
   version: z.string().max(10).default('1'),
   name: z.string().min(1).max(255),
@@ -68,6 +67,7 @@ export const formulaCreateSchema = z.object({
     )
     .default([]),
 })
+  .strict()
   .refine((f) => f.manufacturingType !== 'discrete' || f.outputs.length === 1, {
     message: 'Discrete formulas must have exactly one output',
     path: ['outputs'],
@@ -80,7 +80,6 @@ export const formulaCreateSchema = z.object({
 // ─── Production order ─────────────────────────────────────────────────────
 
 export const productionOrderCreateSchema = z.object({
-  companyId: uuid,
   plantId: uuid,
   postingDate: isoDate,
   formulaId: uuid,
@@ -90,12 +89,11 @@ export const productionOrderCreateSchema = z.object({
   expectedStartDate: isoDate.optional(),
   expectedEndDate: isoDate.optional(),
   remarks: z.string().optional(),
-});
+}).strict();
 
 // ─── Issue materials to an order ────────────────────────────────────────────
 
 export const issueMaterialsSchema = z.object({
-  companyId: uuid,
   postingDate: isoDate.optional(),
   lines: z
     .array(
@@ -109,12 +107,11 @@ export const issueMaterialsSchema = z.object({
       })
     )
     .min(1),
-});
+}).strict();
 
 // ─── Record outputs (production receipt) ────────────────────────────────────
 
 export const recordOutputSchema = z.object({
-  companyId: uuid,
   postingDate: isoDate.optional(),
   standardCostPaise: paisePos.optional(),
   outputs: z
@@ -130,7 +127,7 @@ export const recordOutputSchema = z.object({
       })
     )
     .min(1),
-});
+}).strict();
 
 // ─── Inferred input types ────────────────────────────────────────────────────
 

@@ -102,10 +102,19 @@ export class ApprovalEngine {
     userId: string,
     action: 'approved' | 'rejected',
     remarks?: string,
-    options?: { skipFinalizeDoc?: boolean; bypassSod?: boolean }
+    options?: { skipFinalizeDoc?: boolean; bypassSod?: boolean; companyId?: string }
   ): Promise<ActResult> {
-    const [req] = await tx.select().from(approvalRequests).where(eq(approvalRequests.id, requestId)).limit(1);
+    // Lock the request row for the life of the tx so two concurrent approvals
+    // cannot both read 'pending' and each advance/finalize the same request.
+    const [req] = await tx.select().from(approvalRequests)
+      .where(eq(approvalRequests.id, requestId)).limit(1).for('update');
     if (!req) throw new Error('Approval request not found');
+    // Tenant-ownership gate — moved inside the locked tx (was a pre-check on the
+    // route). When the caller passes its trusted companyId, the request must
+    // belong to it; a foreign id is indistinguishable from a missing one.
+    if (options?.companyId && req.companyId !== options.companyId) {
+      throw new Error('Approval request not found');
+    }
     if (req.status !== 'pending') throw new Error(`Approval request is already ${req.status}`);
 
     // Segregation of duties — the submitter cannot approve their own document, unless bypassed.
@@ -138,6 +147,24 @@ export class ApprovalEngine {
       }
     }
 
+    // One vote per approver per level. N-of-M counts DISTINCT approvers, so a
+    // single user cannot satisfy a 2-of-M level by approving twice. Enforced
+    // physically by a unique index (requestId, level, performedBy); checked here
+    // first so a repeat vote fails with a clear message, not a constraint error.
+    if (action === 'approved') {
+      const [already] = await tx
+        .select({ id: approvalActions.id })
+        .from(approvalActions)
+        .where(and(
+          eq(approvalActions.requestId, req.id),
+          eq(approvalActions.level, current.level),
+          eq(approvalActions.performedBy, userId),
+          eq(approvalActions.action, 'approved'),
+        ))
+        .limit(1);
+      if (already) throw new Error('You have already approved this level');
+    }
+
     await tx.insert(approvalActions).values({
       requestId: req.id, level: current.level, action, performedBy: userId, remarks,
     });
@@ -148,17 +175,17 @@ export class ApprovalEngine {
       return { finalized: true, decision: 'rejected' };
     }
 
-    // Approved — has this level met its required count?
-    const approvals = await tx
-      .select({ id: approvalActions.id })
+    // Approved — has this level met its required count of DISTINCT approvers?
+    const approvers = await tx
+      .selectDistinct({ performedBy: approvalActions.performedBy })
       .from(approvalActions)
       .where(and(
         eq(approvalActions.requestId, req.id),
         eq(approvalActions.level, current.level),
         eq(approvalActions.action, 'approved'),
       ));
-    if (approvals.length < current.requiredApprovals) {
-      return { recorded: true, remaining: current.requiredApprovals - approvals.length };
+    if (approvers.length < current.requiredApprovals) {
+      return { recorded: true, remaining: current.requiredApprovals - approvers.length };
     }
 
     const next = resolved.levels.find((l) => l.level > current.level);

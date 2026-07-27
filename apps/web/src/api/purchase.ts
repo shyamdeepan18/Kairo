@@ -26,6 +26,8 @@ export interface PurchaseHeader {
   netAmountPaise: number;
   taxAmountPaise: number;
   totalAmountPaise: number;
+  paidAmountPaise?: number;
+  paymentStatus?: string;
   remarks: string | null;
   purpose?: string | null;
   createdAt: string;
@@ -56,11 +58,14 @@ export type PurchaseAction = 'submit' | 'approve' | 'reject' | 'cancel';
 
 // ─── Generic helpers (one shape per backend route family) ──────────────────
 
-const listDocs = <T = PurchaseHeader>(path: string, companyId: string, params?: Record<string, unknown>) =>
-  api.get<Paginated<T>>(`${BASE}/${path}`, { params: { companyId, ...(params ?? {}) } }).then((r) => r.data);
+// NOTE: companyId is derived server-side from the session/JWT (tenant context)
+// and is no longer sent on the wire. The `_companyId` params are retained only
+// to avoid churning every call site; they are intentionally unused.
+const listDocs = <T = PurchaseHeader>(path: string, _companyId: string, params?: Record<string, unknown>) =>
+  api.get<Paginated<T>>(`${BASE}/${path}`, { params: { ...(params ?? {}) } }).then((r) => r.data);
 
-const getDoc = <T = any>(path: string, companyId: string, id: string) =>
-  api.get<T>(`${BASE}/${path}/${id}`, { params: { companyId } }).then((r) => r.data);
+const getDoc = <T = any>(path: string, _companyId: string, id: string) =>
+  api.get<T>(`${BASE}/${path}/${id}`).then((r) => r.data);
 
 const createDoc = <T = any>(path: string, body: Record<string, unknown>) =>
   api.post<T>(`${BASE}/${path}`, body).then((r) => r.data);
@@ -69,9 +74,9 @@ const updateDoc = <T = any>(path: string, id: string, body: Record<string, unkno
   api.put<T>(`${BASE}/${path}/${id}`, body).then((r) => r.data);
 
 
-/** Lifecycle transition — companyId travels in the body (resolveCompany reads it). */
-const act = (path: string, id: string, action: PurchaseAction, companyId: string, remarks?: string) =>
-  api.post(`${BASE}/${path}/${id}/${action}`, { companyId, remarks }).then((r) => r.data);
+/** Lifecycle transition — tenant is resolved server-side from the session. */
+const act = (path: string, id: string, action: PurchaseAction, _companyId: string, remarks?: string) =>
+  api.post(`${BASE}/${path}/${id}/${action}`, { remarks }).then((r) => r.data);
 
 // ─── Suppliers (vendor master, exposed by the purchase module) ──────────────
 
@@ -91,7 +96,7 @@ export const purchaseApi = {
 
   requisitions: {
     list: (companyId: string, params?: Record<string, unknown>) => listDocs('requisitions', companyId, params),
-    pendingLines: (companyId: string) => api.get(`${BASE}/requisitions/pending-lines`, { params: { companyId } }).then((r) => r.data),
+    pendingLines: (_companyId: string) => api.get(`${BASE}/requisitions/pending-lines`).then((r) => r.data),
     get: (companyId: string, id: string) => getDoc('requisitions', companyId, id),
     create: (body: Record<string, unknown>) => createDoc('requisitions', body),
     act: (id: string, action: PurchaseAction, companyId: string, remarks?: string) => act('requisitions', id, action, companyId, remarks),

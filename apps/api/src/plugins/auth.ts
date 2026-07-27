@@ -36,6 +36,10 @@ export default fp(async (app: FastifyInstance) => {
           email: p.email,
           fullName: p.fullName,
           isSystemAdmin: p.isSystemAdmin,
+          // Trusted active tenant context (bound via select-context). Carried
+          // through so resolveTenantContext can read it without re-decoding.
+          activeCompanyId: p.activeCompanyId ?? null,
+          activePlantId: p.activePlantId ?? null,
         };
       } catch (e: any) {
         request.log.error(e, 'JWT Verify failed');

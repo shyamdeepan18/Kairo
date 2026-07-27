@@ -3,11 +3,27 @@
  *
  * Registered at: /api/settings/:companyId
  *
- * All routes require authentication. The companyId URL param scopes every query.
- * Future: add authorization checks (settings.company.edit permission).
+ * Every route runs authenticate + resolveTenantContext (the tenant is derived
+ * from the trusted session/JWT, never the URL param) and is gated by authorize()
+ * against a permission: company / number-series / tax-codes / custom-fields /
+ * HSN use settings.company.*; plants and warehouses use settings.plant.* and
+ * settings.warehouse.*; users use auth.users.*; roles use auth.roles.* and
+ * auth.permissions.manage; chart of accounts uses accounting.coa.*; approval
+ * workflows use settings.approvalworkflow.view and .manage.
+ * Config routes whose params/body carry a plantId/warehouseId that names the
+ * object being administered pass authorize's { noScope: true } so they are not
+ * subject to operational plant/warehouse access grants.
+ *
+ * Phase 4: every write body is parsed by a strict Zod DTO. Server-owned fields
+ * (id/companyId/audit) are removed by stripServerOwned() before parsing — never
+ * mass-assignable, but tolerated if echoed back; any other stray key is rejected.
+ * Client-supplied foreign keys (account parentId, warehouse/number-series plantId,
+ * invite roleId/plantId, workflow approver role/user) are proven to belong to the
+ * active tenant via assertOwned/assertOwnedOrGlobal.
  */
 
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
+import { z } from 'zod';
 import { db } from '@erp/db';
 import {
   companies, plants, warehouses, users, userRoles, roles, rolePermissions,
@@ -17,10 +33,28 @@ import {
   approvalWorkflows,
   approvalWorkflowLevels,
 } from '@erp/db';
-import type { L2FieldDef, L2Fields } from '@erp/db';
+import type { L2Fields } from '@erp/db';
 import { eq, and, inArray, isNull, desc, ilike, or, asc } from 'drizzle-orm';
 import argon2 from 'argon2';
 import { authorize } from '../middleware/authorize.js';
+import { resolveTenantContext, tenant } from '../middleware/tenant-context.js';
+import { byTenantId } from '../db/tenant-query.js';
+import { assertOwned, assertOwnedOrGlobal } from '../db/fk-ownership.js';
+import { stripServerOwned } from '../db/dto.js';
+
+/**
+ * 404 helper. @fastify/sensible was never installed/registered, so
+ * `app.httpErrors` is undefined at runtime — the old calls threw a 500.
+ * Fastify honours `err.statusCode`, giving a proper 404.
+ */
+function notFound(message: string): never {
+  throw Object.assign(new Error(message), { statusCode: 404 });
+}
+
+/** 400 helper for a failed DTO parse. */
+function invalid(reply: FastifyReply, parsed: { error: z.ZodError }) {
+  return reply.code(400).send({ error: 'Invalid input', issues: parsed.error.issues });
+}
 
 // ─── helpers: number series formatting ─────────────────────────────────────
 
@@ -53,18 +87,185 @@ function randomPassword(len = 12) {
   return Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
 }
 
+/**
+ * Current user id. The authenticate decorator remaps the JWT to `request.user.id`
+ * (the token's `sub`), so reading `.sub` off request.user returns undefined — the
+ * previous `(req.user as { sub }).sub` silently nulled createdBy/updatedBy.
+ */
+const uid = (req: { user?: unknown }) => (req.user as { id?: string; sub?: string }).id
+  ?? (req.user as { sub?: string }).sub ?? null;
+
+// ─── Strict DTO schemas ─────────────────────────────────────────────────────
+// Server-owned fields (id/companyId/audit) are removed by stripServerOwned()
+// before parsing; these schemas allowlist everything else and reject stray keys.
+
+const uuid = z.string().uuid();
+const optStr = (max: number) => z.string().max(max).optional();
+
+const companyUpdateSchema = z.object({
+  name: z.string().min(1).max(255).optional(),
+  legalName: optStr(255),
+  gstin: z.string().length(15).optional(),
+  pan: z.string().length(10).optional(),
+  address: z.string().optional(),
+  city: optStr(100),
+  state: optStr(100),
+  stateCode: z.string().length(2).optional(),
+  pincode: optStr(6),
+  phone: optStr(20),
+  email: optStr(255),
+  website: optStr(255),
+  baseCurrency: optStr(3),
+  financialYearStart: optStr(10),
+}).strict();
+
+const inviteUserSchema = z.object({
+  email: z.string().email().max(255),
+  fullName: z.string().min(1).max(255),
+  roleId: uuid,
+  plantId: uuid.optional(),
+}).strict();
+
+const toggleUserSchema = z.object({ isActive: z.boolean() }).strict();
+
+const roleCreateSchema = z.object({
+  name: z.string().min(1).max(100),
+  description: optStr(500),
+}).strict();
+
+const rolePermissionsSchema = z.object({
+  grantedCodes: z.array(z.string().min(1).max(100)),
+}).strict();
+
+const accountCreateSchema = z.object({
+  code: z.string().min(1).max(50),
+  name: z.string().min(1).max(255),
+  accountType: z.string().min(1).max(20),
+  normalBalance: z.string().min(1).max(10),
+  parentId: uuid.optional(),
+  isGroup: z.boolean().optional(),
+  postingCategory: optStr(100),
+}).strict();
+const accountUpdateSchema = z.object({
+  name: z.string().min(1).max(255).optional(),
+  postingCategory: optStr(100),
+  isActive: z.boolean().optional(),
+}).strict();
+
+const plantBase = z.object({
+  code: z.string().min(1).max(50),
+  name: z.string().min(1).max(255),
+  gstin: z.string().length(15).optional(),
+  address: z.string().optional(),
+  city: optStr(100),
+  state: optStr(100),
+  stateCode: z.string().length(2).optional(),
+  pincode: optStr(6),
+  phone: optStr(20),
+});
+const plantCreateSchema = plantBase.strict();
+const plantUpdateSchema = plantBase.extend({ isActive: z.boolean() }).partial().strict();
+
+const warehouseTypeEnum = z.enum([
+  'raw_material', 'work_in_progress', 'finished_goods', 'scrap', 'transit', 'consignment',
+]);
+const warehouseCreateSchema = z.object({
+  plantId: uuid,
+  code: z.string().min(1).max(50),
+  name: z.string().min(1).max(255),
+  warehouseType: warehouseTypeEnum.optional(),
+  isDefault: z.boolean().optional(),
+}).strict();
+const warehouseUpdateSchema = z.object({
+  code: z.string().min(1).max(50).optional(),
+  name: z.string().min(1).max(255).optional(),
+  warehouseType: warehouseTypeEnum.optional(),
+  isDefault: z.boolean().optional(),
+  isActive: z.boolean().optional(),
+}).strict();
+
+const numberSeriesCreateSchema = z.object({
+  documentType: z.string().min(1).max(50),
+  prefix: z.string().min(1).max(20),
+  plantId: uuid.optional(),
+  fiscalYear: optStr(10),
+  includeFiscalYear: z.boolean().optional(),
+  includePlantCode: z.boolean().optional(),
+  padding: z.number().int().min(1).max(12).optional(),
+  currentNumber: z.number().int().nonnegative().optional(),
+  resetOnNewYear: z.boolean().optional(),
+}).strict();
+const numberSeriesUpdateSchema = z.object({
+  prefix: z.string().min(1).max(20).optional(),
+  includeFiscalYear: z.boolean().optional(),
+  includePlantCode: z.boolean().optional(),
+  padding: z.number().int().min(1).max(12).optional(),
+  currentNumber: z.number().int().nonnegative().optional(),
+  resetOnNewYear: z.boolean().optional(),
+  isActive: z.boolean().optional(),
+}).strict();
+
+const taxCodeCreateSchema = z.object({
+  code: z.string().min(1).max(50),
+  name: z.string().min(1).max(255),
+  rateType: z.string().min(1).max(20),
+  gstRateBp: z.number().int().nonnegative(),
+  cessRateBp: z.number().int().nonnegative().optional(),
+}).strict();
+const taxCodeUpdateSchema = z.object({
+  name: z.string().min(1).max(255).optional(),
+  isActive: z.boolean().optional(),
+}).strict();
+
+const l2FieldSchema = z.object({
+  id: z.string().min(1),
+  fieldName: z.string().min(1),
+  label: z.string().min(1),
+  fieldType: z.string().min(1),
+  scope: z.enum(['header', 'line']),
+  required: z.boolean(),
+  showInList: z.boolean().optional(),
+  options: z.array(z.string()).optional(),
+  linkTo: z.string().optional(),
+  validations: z.object({
+    minLength: z.number().int().optional(),
+    maxLength: z.number().int().optional(),
+    min: z.number().optional(),
+    max: z.number().optional(),
+    pattern: z.string().optional(),
+  }).strict().optional(),
+}).strict();
+const customFieldsPutSchema = z.object({
+  documentType: z.string().min(1).max(100),
+  fields: z.array(l2FieldSchema),
+}).strict();
+
+const workflowLevelSchema = z.object({
+  id: uuid.optional(),
+  level: z.number().int().positive(),
+  thresholdMinPaise: z.number().int().nonnegative(),
+  thresholdMaxPaise: z.number().int().nonnegative().nullable(),
+  approverType: z.enum(['user', 'role']),
+  approverUserId: uuid.nullable().optional(),
+  approverRoleId: uuid.nullable().optional(),
+  requiredApprovals: z.number().int().positive(),
+}).strict();
+const workflowPutSchema = z.object({
+  levels: z.array(workflowLevelSchema),
+}).strict();
+
 export default async function settingsRoutes(app: FastifyInstance) {
   // ── Company ────────────────────────────────────────────────────────────────
 
   app.get<{ Params: { companyId: string } }>(
     '/:companyId',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, resolveTenantContext, authorize('settings.company.view')] },
     async (req) => {
       const [co] = await db
         .select()
         .from(companies)
-        .where(eq(companies.id, req.params.companyId));
-      if (!co) throw app.httpErrors.notFound('Company not found');
+        .where(eq(companies.id, tenant(req).companyId));
+      if (!co) notFound('Company not found');
       return { company: co };
     }
   );
@@ -79,15 +280,17 @@ export default async function settingsRoutes(app: FastifyInstance) {
     };
   }>(
     '/:companyId',
-    { preHandler: [app.authenticate] },
-    async (req) => {
-      const { companyId } = req.params;
+    { preHandler: [app.authenticate, resolveTenantContext, authorize('settings.company.edit')] },
+    async (req, reply) => {
+      const parsed = companyUpdateSchema.safeParse(stripServerOwned(req.body));
+      if (!parsed.success) return invalid(reply, parsed);
+      const { companyId } = tenant(req);
       const [updated] = await db
         .update(companies)
-        .set({ ...req.body, updatedAt: new Date() })
+        .set({ ...parsed.data, updatedAt: new Date() })
         .where(eq(companies.id, companyId))
         .returning();
-      if (!updated) throw app.httpErrors.notFound('Company not found');
+      if (!updated) notFound('Company not found');
       return { company: updated };
     }
   );
@@ -96,9 +299,9 @@ export default async function settingsRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { companyId: string } }>(
     '/:companyId/users',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, resolveTenantContext, authorize('auth.users.view')] },
     async (req) => {
-      const { companyId } = req.params;
+      const { companyId } = tenant(req);
 
       // Get all user-role assignments for this company
       const assignments = await db
@@ -145,10 +348,16 @@ export default async function settingsRoutes(app: FastifyInstance) {
     Body: { email: string; fullName: string; roleId: string; plantId?: string };
   }>(
     '/:companyId/users/invite',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, resolveTenantContext, authorize('auth.users.create', { noScope: true })] },
     async (req, reply) => {
-      const { companyId } = req.params;
-      const { email, fullName, roleId, plantId } = req.body;
+      const parsed = inviteUserSchema.safeParse(stripServerOwned(req.body));
+      if (!parsed.success) return invalid(reply, parsed);
+      const { companyId } = tenant(req);
+      const { email, fullName, roleId, plantId } = parsed.data;
+      // The role (a tenant role or a shared system role) and the optional plant
+      // must belong to this company — never a ref smuggled in from another tenant.
+      await assertOwnedOrGlobal(roles, roleId, companyId, 'Role');
+      await assertOwned(plants, plantId, companyId, 'Plant');
 
       // Check if user already exists
       let [existing] = await db
@@ -180,7 +389,7 @@ export default async function settingsRoutes(app: FastifyInstance) {
           roleId,
           companyId,
           plantId: plantId ?? null,
-          grantedBy: (req.user as { sub: string }).sub,
+          grantedBy: uid(req),
         })
         .onConflictDoNothing();
 
@@ -194,12 +403,20 @@ export default async function settingsRoutes(app: FastifyInstance) {
     Body: { isActive: boolean };
   }>(
     '/:companyId/users/:userId/toggle',
-    { preHandler: [app.authenticate] },
-    async (req) => {
+    { preHandler: [app.authenticate, resolveTenantContext, authorize('auth.users.deactivate')] },
+    async (req, reply) => {
+      const parsed = toggleUserSchema.safeParse(stripServerOwned(req.body));
+      if (!parsed.success) return invalid(reply, parsed);
       const { userId } = req.params;
+      const { companyId } = tenant(req);
+      // Only toggle a user who is a member of the active company — otherwise a
+      // user in company A could (de)activate an unrelated user in company B.
+      const [membership] = await db.select({ id: userRoles.id }).from(userRoles)
+        .where(and(eq(userRoles.userId, userId), eq(userRoles.companyId, companyId))).limit(1);
+      if (!membership) notFound('User not found in this company');
       const [updated] = await db
         .update(users)
-        .set({ isActive: req.body.isActive, updatedAt: new Date() })
+        .set({ isActive: parsed.data.isActive, updatedAt: new Date() })
         .where(eq(users.id, userId))
         .returning({ id: users.id, isActive: users.isActive });
       return { user: updated };
@@ -210,9 +427,9 @@ export default async function settingsRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { companyId: string } }>(
     '/:companyId/roles',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, resolveTenantContext, authorize('auth.roles.view')] },
     async (req) => {
-      const { companyId } = req.params;
+      const { companyId } = tenant(req);
       const list = await db
         .select()
         .from(roles)
@@ -230,12 +447,14 @@ export default async function settingsRoutes(app: FastifyInstance) {
     Body: { name: string; description?: string };
   }>(
     '/:companyId/roles',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, resolveTenantContext, authorize('auth.roles.manage')] },
     async (req, reply) => {
-      const { companyId } = req.params;
+      const parsed = roleCreateSchema.safeParse(stripServerOwned(req.body));
+      if (!parsed.success) return invalid(reply, parsed);
+      const { companyId } = tenant(req);
       const [created] = await db
         .insert(roles)
-        .values({ companyId, name: req.body.name, description: req.body.description })
+        .values({ companyId, name: parsed.data.name, description: parsed.data.description })
         .returning();
       reply.code(201);
       return { role: created };
@@ -245,9 +464,13 @@ export default async function settingsRoutes(app: FastifyInstance) {
   // Get permissions granted to a role (returns permission codes)
   app.get<{ Params: { companyId: string; roleId: string } }>(
     '/:companyId/roles/:roleId/permissions',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, resolveTenantContext, authorize('auth.roles.view')] },
     async (req) => {
       const { roleId } = req.params;
+      // The role must belong to the active tenant.
+      const [role] = await db.select({ id: roles.id }).from(roles)
+        .where(byTenantId(roles, roleId, tenant(req).companyId)).limit(1);
+      if (!role) notFound('Role not found');
       const rows = await db
         .select({ code: permissions.code })
         .from(rolePermissions)
@@ -263,10 +486,17 @@ export default async function settingsRoutes(app: FastifyInstance) {
     Body: { grantedCodes: string[] };
   }>(
     '/:companyId/roles/:roleId/permissions',
-    { preHandler: [app.authenticate] },
-    async (req) => {
+    { preHandler: [app.authenticate, resolveTenantContext, authorize('auth.permissions.manage')] },
+    async (req, reply) => {
+      const parsed = rolePermissionsSchema.safeParse(stripServerOwned(req.body));
+      if (!parsed.success) return invalid(reply, parsed);
       const { roleId } = req.params;
-      const { grantedCodes } = req.body;
+      const { grantedCodes } = parsed.data;
+
+      // The role must belong to the active tenant before its permissions change.
+      const [role] = await db.select({ id: roles.id }).from(roles)
+        .where(byTenantId(roles, roleId, tenant(req).companyId)).limit(1);
+      if (!role) notFound('Role not found');
 
       await db.transaction(async (tx) => {
         // Delete all existing permissions for this role
@@ -297,7 +527,7 @@ export default async function settingsRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { companyId: string } }>(
     '/:companyId/accounts',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, resolveTenantContext, authorize('accounting.coa.view')] },
     async (req) => {
       const list = await db
         .select({
@@ -313,7 +543,7 @@ export default async function settingsRoutes(app: FastifyInstance) {
           isActive: chartOfAccounts.isActive,
         })
         .from(chartOfAccounts)
-        .where(eq(chartOfAccounts.companyId, req.params.companyId))
+        .where(eq(chartOfAccounts.companyId, tenant(req).companyId))
         .orderBy(chartOfAccounts.code);
       return { accounts: list };
     }
@@ -327,16 +557,19 @@ export default async function settingsRoutes(app: FastifyInstance) {
     };
   }>(
     '/:companyId/accounts',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, resolveTenantContext, authorize('accounting.coa.manage')] },
     async (req, reply) => {
-      const { companyId } = req.params;
+      const parsed = accountCreateSchema.safeParse(stripServerOwned(req.body));
+      if (!parsed.success) return invalid(reply, parsed);
+      const { companyId } = tenant(req);
+      await assertOwned(chartOfAccounts, parsed.data.parentId, companyId, 'Parent account');
       const [created] = await db
         .insert(chartOfAccounts)
         .values({
+          ...parsed.data,
           companyId,
-          ...req.body,
-          isGroup: req.body.isGroup ?? false,
-          createdBy: (req.user as { sub: string }).sub,
+          isGroup: parsed.data.isGroup ?? false,
+          createdBy: uid(req),
         })
         .returning();
       reply.code(201);
@@ -349,14 +582,17 @@ export default async function settingsRoutes(app: FastifyInstance) {
     Body: { name?: string; postingCategory?: string; isActive?: boolean };
   }>(
     '/:companyId/accounts/:accountId',
-    { preHandler: [app.authenticate] },
-    async (req) => {
+    { preHandler: [app.authenticate, resolveTenantContext, authorize('accounting.coa.manage')] },
+    async (req, reply) => {
+      const parsed = accountUpdateSchema.safeParse(stripServerOwned(req.body));
+      if (!parsed.success) return invalid(reply, parsed);
       const { accountId } = req.params;
       const [updated] = await db
         .update(chartOfAccounts)
-        .set({ ...req.body, updatedAt: new Date(), updatedBy: (req.user as { sub: string }).sub })
-        .where(eq(chartOfAccounts.id, accountId))
+        .set({ ...parsed.data, updatedAt: new Date(), updatedBy: uid(req) })
+        .where(byTenantId(chartOfAccounts, accountId, tenant(req).companyId))
         .returning();
+      if (!updated) notFound('Account not found');
       return { account: updated };
     }
   );
@@ -365,12 +601,12 @@ export default async function settingsRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { companyId: string } }>(
     '/:companyId/plants',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, resolveTenantContext, authorize('settings.plants.view')] },
     async (req) => {
       const list = await db
         .select()
         .from(plants)
-        .where(eq(plants.companyId, req.params.companyId))
+        .where(eq(plants.companyId, tenant(req).companyId))
         .orderBy(asc(plants.code));
       return { plants: list };
     }
@@ -384,12 +620,14 @@ export default async function settingsRoutes(app: FastifyInstance) {
     };
   }>(
     '/:companyId/plants',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, resolveTenantContext, authorize('settings.plant.create')] },
     async (req, reply) => {
-      const { companyId } = req.params;
+      const parsed = plantCreateSchema.safeParse(stripServerOwned(req.body));
+      if (!parsed.success) return invalid(reply, parsed);
+      const { companyId } = tenant(req);
       const [created] = await db
         .insert(plants)
-        .values({ companyId, ...req.body, createdBy: (req.user as { sub: string }).sub })
+        .values({ ...parsed.data, companyId, createdBy: uid(req) })
         .returning();
       reply.code(201);
       return { plant: created };
@@ -405,15 +643,17 @@ export default async function settingsRoutes(app: FastifyInstance) {
     };
   }>(
     '/:companyId/plants/:plantId',
-    { preHandler: [app.authenticate] },
-    async (req) => {
+    { preHandler: [app.authenticate, resolveTenantContext, authorize('settings.plant.edit', { noScope: true })] },
+    async (req, reply) => {
+      const parsed = plantUpdateSchema.safeParse(stripServerOwned(req.body));
+      if (!parsed.success) return invalid(reply, parsed);
       const { plantId } = req.params;
       const [updated] = await db
         .update(plants)
-        .set({ ...req.body, updatedAt: new Date() })
-        .where(eq(plants.id, plantId))
+        .set({ ...parsed.data, updatedAt: new Date() })
+        .where(byTenantId(plants, plantId, tenant(req).companyId))
         .returning();
-      if (!updated) throw app.httpErrors.notFound('Plant not found');
+      if (!updated) notFound('Plant not found');
       return { plant: updated };
     }
   );
@@ -422,9 +662,9 @@ export default async function settingsRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { companyId: string }; Querystring: { plantId?: string } }>(
     '/:companyId/warehouses',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, resolveTenantContext, authorize('settings.plants.view', { noScope: true })] },
     async (req) => {
-      const { companyId } = req.params;
+      const { companyId } = tenant(req);
       const { plantId } = req.query;
       const where = plantId
         ? and(eq(warehouses.companyId, companyId), eq(warehouses.plantId, plantId))
@@ -446,10 +686,14 @@ export default async function settingsRoutes(app: FastifyInstance) {
     };
   }>(
     '/:companyId/warehouses',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, resolveTenantContext, authorize('settings.warehouse.create', { noScope: true })] },
     async (req, reply) => {
-      const { companyId } = req.params;
-      const { plantId, code, name, warehouseType, isDefault } = req.body;
+      const parsed = warehouseCreateSchema.safeParse(stripServerOwned(req.body));
+      if (!parsed.success) return invalid(reply, parsed);
+      const { companyId } = tenant(req);
+      const { plantId, code, name, warehouseType, isDefault } = parsed.data;
+      // The warehouse's plant must belong to this tenant.
+      await assertOwned(plants, plantId, companyId, 'Plant');
       const [created] = await db
         .insert(warehouses)
         .values({
@@ -457,9 +701,9 @@ export default async function settingsRoutes(app: FastifyInstance) {
           plantId,
           code,
           name,
-          warehouseType: (warehouseType as any) ?? 'raw_material',
+          warehouseType: warehouseType ?? 'raw_material',
           isDefault: isDefault ?? false,
-          createdBy: (req.user as { sub: string }).sub,
+          createdBy: uid(req),
         })
         .returning();
       reply.code(201);
@@ -472,15 +716,17 @@ export default async function settingsRoutes(app: FastifyInstance) {
     Body: { code?: string; name?: string; warehouseType?: string; isDefault?: boolean; isActive?: boolean };
   }>(
     '/:companyId/warehouses/:warehouseId',
-    { preHandler: [app.authenticate] },
-    async (req) => {
+    { preHandler: [app.authenticate, resolveTenantContext, authorize('settings.warehouse.edit', { noScope: true })] },
+    async (req, reply) => {
+      const parsed = warehouseUpdateSchema.safeParse(stripServerOwned(req.body));
+      if (!parsed.success) return invalid(reply, parsed);
       const { warehouseId } = req.params;
       const [updated] = await db
         .update(warehouses)
-        .set({ ...(req.body as any), updatedAt: new Date() })
-        .where(eq(warehouses.id, warehouseId))
+        .set({ ...parsed.data, updatedAt: new Date() })
+        .where(byTenantId(warehouses, warehouseId, tenant(req).companyId))
         .returning();
-      if (!updated) throw app.httpErrors.notFound('Warehouse not found');
+      if (!updated) notFound('Warehouse not found');
       return { warehouse: updated };
     }
   );
@@ -489,19 +735,19 @@ export default async function settingsRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { companyId: string } }>(
     '/:companyId/number-series',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, resolveTenantContext, authorize('settings.company.view')] },
     async (req) => {
       const list = await db
         .select()
         .from(documentNumberSeries)
-        .where(eq(documentNumberSeries.companyId, req.params.companyId))
+        .where(eq(documentNumberSeries.companyId, tenant(req).companyId))
         .orderBy(asc(documentNumberSeries.documentType));
 
       // Attach plant codes for preview rendering
       const plantList = await db
         .select({ id: plants.id, code: plants.code })
         .from(plants)
-        .where(eq(plants.companyId, req.params.companyId));
+        .where(eq(plants.companyId, tenant(req).companyId));
       const plantCode = new Map(plantList.map((p) => [p.id, p.code]));
 
       const series = list.map((s) => ({
@@ -522,10 +768,13 @@ export default async function settingsRoutes(app: FastifyInstance) {
     };
   }>(
     '/:companyId/number-series',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, resolveTenantContext, authorize('settings.company.edit', { noScope: true })] },
     async (req, reply) => {
-      const { companyId } = req.params;
-      const b = req.body;
+      const parsed = numberSeriesCreateSchema.safeParse(stripServerOwned(req.body));
+      if (!parsed.success) return invalid(reply, parsed);
+      const { companyId } = tenant(req);
+      const b = parsed.data;
+      await assertOwned(plants, b.plantId, companyId, 'Plant');
       const [created] = await db
         .insert(documentNumberSeries)
         .values({
@@ -554,15 +803,17 @@ export default async function settingsRoutes(app: FastifyInstance) {
     };
   }>(
     '/:companyId/number-series/:seriesId',
-    { preHandler: [app.authenticate] },
-    async (req) => {
+    { preHandler: [app.authenticate, resolveTenantContext, authorize('settings.company.edit')] },
+    async (req, reply) => {
+      const parsed = numberSeriesUpdateSchema.safeParse(stripServerOwned(req.body));
+      if (!parsed.success) return invalid(reply, parsed);
       const { seriesId } = req.params;
       const [updated] = await db
         .update(documentNumberSeries)
-        .set({ ...req.body, updatedAt: new Date() })
-        .where(eq(documentNumberSeries.id, seriesId))
+        .set({ ...parsed.data, updatedAt: new Date() })
+        .where(byTenantId(documentNumberSeries, seriesId, tenant(req).companyId))
         .returning();
-      if (!updated) throw app.httpErrors.notFound('Number series not found');
+      if (!updated) notFound('Number series not found');
       return { series: updated };
     }
   );
@@ -571,12 +822,12 @@ export default async function settingsRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { companyId: string } }>(
     '/:companyId/tax-codes',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, resolveTenantContext, authorize('settings.company.view')] },
     async (req) => {
       const list = await db
         .select()
         .from(taxCodes)
-        .where(eq(taxCodes.companyId, req.params.companyId))
+        .where(eq(taxCodes.companyId, tenant(req).companyId))
         .orderBy(asc(taxCodes.gstRateBp), asc(taxCodes.code));
       return { taxCodes: list };
     }
@@ -589,10 +840,12 @@ export default async function settingsRoutes(app: FastifyInstance) {
     };
   }>(
     '/:companyId/tax-codes',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, resolveTenantContext, authorize('settings.company.edit')] },
     async (req, reply) => {
-      const { companyId } = req.params;
-      const { code, name, rateType, gstRateBp, cessRateBp } = req.body;
+      const parsed = taxCodeCreateSchema.safeParse(stripServerOwned(req.body));
+      if (!parsed.success) return invalid(reply, parsed);
+      const { companyId } = tenant(req);
+      const { code, name, rateType, gstRateBp, cessRateBp } = parsed.data;
       const half = Math.round(gstRateBp / 2);
       const [created] = await db
         .insert(taxCodes)
@@ -606,7 +859,7 @@ export default async function settingsRoutes(app: FastifyInstance) {
           sgstRateBp: gstRateBp - half,   // keep cgst+sgst == gst exactly
           igstRateBp: gstRateBp,
           cessRateBp: cessRateBp ?? 0,
-          createdBy: (req.user as { sub: string }).sub,
+          createdBy: uid(req),
         })
         .returning();
       reply.code(201);
@@ -619,15 +872,17 @@ export default async function settingsRoutes(app: FastifyInstance) {
     Body: { name?: string; isActive?: boolean };
   }>(
     '/:companyId/tax-codes/:taxCodeId',
-    { preHandler: [app.authenticate] },
-    async (req) => {
+    { preHandler: [app.authenticate, resolveTenantContext, authorize('settings.company.edit')] },
+    async (req, reply) => {
+      const parsed = taxCodeUpdateSchema.safeParse(stripServerOwned(req.body));
+      if (!parsed.success) return invalid(reply, parsed);
       const { taxCodeId } = req.params;
       const [updated] = await db
         .update(taxCodes)
-        .set({ ...req.body, updatedAt: new Date() })
-        .where(eq(taxCodes.id, taxCodeId))
+        .set({ ...parsed.data, updatedAt: new Date() })
+        .where(byTenantId(taxCodes, taxCodeId, tenant(req).companyId))
         .returning();
-      if (!updated) throw app.httpErrors.notFound('Tax code not found');
+      if (!updated) notFound('Tax code not found');
       return { taxCode: updated };
     }
   );
@@ -636,7 +891,7 @@ export default async function settingsRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { companyId: string }; Querystring: { q?: string } }>(
     '/:companyId/hsn-codes',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, resolveTenantContext, authorize('settings.company.view')] },
     async (req) => {
       const q = (req.query.q ?? '').trim();
       const base = db.select().from(hsnSacCodes);
@@ -654,9 +909,9 @@ export default async function settingsRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { companyId: string }; Querystring: { documentType?: string } }>(
     '/:companyId/custom-fields',
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.authenticate, resolveTenantContext, authorize('settings.company.view')] },
     async (req) => {
-      const { companyId } = req.params;
+      const { companyId } = tenant(req);
       const { documentType } = req.query;
 
       if (documentType) {
@@ -686,14 +941,16 @@ export default async function settingsRoutes(app: FastifyInstance) {
 
   app.put<{
     Params: { companyId: string };
-    Body: { documentType: string; fields: L2FieldDef[] };
+    Body: unknown;
   }>(
     '/:companyId/custom-fields',
-    { preHandler: [app.authenticate] },
-    async (req) => {
-      const { companyId } = req.params;
-      const { documentType, fields } = req.body;
-      const l2Fields: L2Fields = { fields };
+    { preHandler: [app.authenticate, resolveTenantContext, authorize('settings.company.edit')] },
+    async (req, reply) => {
+      const parsed = customFieldsPutSchema.safeParse(stripServerOwned(req.body));
+      if (!parsed.success) return invalid(reply, parsed);
+      const { companyId } = tenant(req);
+      const { documentType, fields } = parsed.data;
+      const l2Fields: L2Fields = { fields: fields as L2Fields['fields'] };
 
       const [existing] = await db
         .select({ id: documentTypeConfig.id })
@@ -707,7 +964,7 @@ export default async function settingsRoutes(app: FastifyInstance) {
       if (existing) {
         const [updated] = await db
           .update(documentTypeConfig)
-          .set({ l2Fields, updatedAt: new Date(), updatedBy: (req.user as { sub: string }).sub })
+          .set({ l2Fields, updatedAt: new Date(), updatedBy: uid(req) })
           .where(eq(documentTypeConfig.id, existing.id))
           .returning();
         return { config: updated };
@@ -719,7 +976,7 @@ export default async function settingsRoutes(app: FastifyInstance) {
           companyId,
           documentType,
           l2Fields,
-          updatedBy: (req.user as { sub: string }).sub,
+          updatedBy: uid(req),
         })
         .returning();
       return { config: created };
@@ -730,9 +987,10 @@ export default async function settingsRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { companyId: string; documentType: string } }>(
     '/:companyId/workflows/:documentType',
-    { preHandler: [app.authenticate, authorize('settings.approvalworkflow.manage')] },
+    { preHandler: [app.authenticate, resolveTenantContext, authorize('settings.approvalworkflow.view')] },
     async (req) => {
-      const { companyId, documentType } = req.params;
+      const { documentType } = req.params;
+      const { companyId } = tenant(req);
 
       const [workflow] = await db
         .select()
@@ -784,25 +1042,42 @@ export default async function settingsRoutes(app: FastifyInstance) {
     };
   }>(
     '/:companyId/workflows/:documentType',
-    { preHandler: [app.authenticate, authorize('settings.approvalworkflow.manage')] },
+    { preHandler: [app.authenticate, resolveTenantContext, authorize('settings.approvalworkflow.manage')] },
     async (req, reply) => {
-      const { companyId, documentType } = req.params;
-      const { levels } = req.body;
+      const parsed = workflowPutSchema.safeParse(stripServerOwned(req.body));
+      if (!parsed.success) return invalid(reply, parsed);
+      const { documentType } = req.params;
+      const { companyId } = tenant(req);
+      const { levels } = parsed.data;
+
+      // Every approver reference must resolve within this tenant.
+      for (const l of levels) {
+        await assertOwnedOrGlobal(roles, l.approverRoleId, companyId, 'Approver role');
+        if (l.approverUserId) {
+          const [member] = await db.select({ id: userRoles.id }).from(userRoles)
+            .where(and(eq(userRoles.userId, l.approverUserId), eq(userRoles.companyId, companyId))).limit(1);
+          if (!member) {
+            return reply.code(400).send({ error: 'Invalid input', detail: 'Approver user is not a member of this company' });
+          }
+        }
+      }
 
       await db.transaction(async (tx) => {
-        // Upsert workflow
+        // Upsert workflow. NOTE: the column is `isActive` (schema), not `isEnabled`
+        // — the old code wrote a non-existent `isEnabled` key so the active flag was
+        // never actually set (audit finding #5).
         const [workflow] = await tx
           .insert(approvalWorkflows)
           .values({
             companyId,
             documentType,
             name: `${documentType} Workflow`,
-            isEnabled: true,
-            createdBy: (req.user as { sub: string }).sub,
+            isActive: true,
+            createdBy: uid(req),
           })
           .onConflictDoUpdate({
             target: [approvalWorkflows.companyId, approvalWorkflows.documentType],
-            set: { isEnabled: true, updatedAt: new Date(), name: `${documentType} Workflow` },
+            set: { isActive: true, updatedAt: new Date(), name: `${documentType} Workflow` },
           })
           .returning();
 

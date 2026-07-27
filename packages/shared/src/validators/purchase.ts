@@ -10,8 +10,7 @@ const isoDate = z.string().min(8);           // 'YYYY-MM-DD'
 
 // ─── Supplier ───────────────────────────────────────────────────────────────
 
-export const supplierCreateSchema = z.object({
-  companyId: uuid,
+const supplierFields = z.object({
   supplierCode: z.string().min(1).max(50),
   name: z.string().min(1).max(255),
   legalName: z.string().max(255).optional(),
@@ -32,7 +31,8 @@ export const supplierCreateSchema = z.object({
   creditLimitPaise: paisePos.default(0),
 });
 
-export const supplierUpdateSchema = supplierCreateSchema.partial().omit({ companyId: true });
+export const supplierCreateSchema = supplierFields.strict();
+export const supplierUpdateSchema = supplierFields.partial().strict();
 
 // ─── Generic document line ──────────────────────────────────────────────────
 
@@ -49,12 +49,14 @@ const docLineSchema = z.object({
   warehouseId: uuid.optional(),
 });
 
+// companyId is NOT a client input — it is derived from the trusted tenant
+// context on the server. .strict() rejects unexpected keys; server-owned fields
+// (id/companyId/audit) are removed by stripServerOwned() before parsing.
 const docHeaderBase = z.object({
-  companyId: uuid,
   plantId: uuid,
   postingDate: isoDate,
   remarks: z.string().optional(),
-});
+}).strict();
 
 // ─── Purchase Requisition ─────────────────────────────────────────────────
 

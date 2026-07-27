@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Table, Typography, Card, DatePicker, message, Tag } from 'antd';
-import axios from 'axios';
+import { api } from '../../api/client';
 import dayjs from 'dayjs';
 
 const { Title } = Typography;
@@ -28,9 +28,7 @@ const PurchaseReport: React.FC = () => {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const res = await axios.get('/api/reports/purchases', {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-      });
+      const res = await api.get<PurchaseRecord[]>('/reports/purchases');
       setData(res.data);
     } catch (error) {
       console.error(error);

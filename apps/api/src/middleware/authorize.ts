@@ -43,6 +43,15 @@ export function authorize(
     amountFrom?: string;
     /** Document type for amount limit check. e.g. 'purchase.po'. Required if amountFrom is set. */
     docType?: string;
+    /**
+     * Skip the plant/warehouse operational access checks (steps 2 & 3), keeping
+     * only the permission-code check. Use on configuration routes where a
+     * `plantId`/`warehouseId` in the params or body names the object being
+     * administered — not an operational scope the caller must already have
+     * access to. Without this, e.g. editing a plant in Settings would require the
+     * admin to hold an explicit userPlantAccess grant for that plant.
+     */
+    noScope?: boolean;
   }
 ) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
@@ -55,15 +64,16 @@ export function authorize(
     if (user.isSystemAdmin) return;
 
     const svc: PermissionService = (request.server as any).permissionService;
-    const companyId: string | undefined =
-      (request as any).companyId ??
-      (request.headers['x-company-id'] as string | undefined) ??
-      get(request, 'body.companyId') ??
-      get(request, 'params.companyId') ??
-      (request.query as any)?.companyId;
+    // Tenant identity comes ONLY from the trusted, server-bound context that
+    // resolveTenantContext derived from the verified JWT. Client-supplied
+    // company hints (x-company-id header, body/params/query) are never trusted —
+    // every authorize()d route runs resolveTenantContext first in its preHandler
+    // chain, so request.tenant is always populated by the time we get here.
+    const companyId: string | undefined = request.tenant?.companyId;
 
     if (!companyId) {
-      // No company context — can't resolve permissions
+      // resolveTenantContext missing from the chain (programming error) or no
+      // active company bound — either way we cannot resolve permissions safely.
       return reply.code(400).send({ error: 'Company context required' });
     }
 
@@ -93,7 +103,7 @@ export function authorize(
     }
 
     // ── Step 2: plant access check ─────────────────────────────────────────
-    if (plantId) {
+    if (plantId && !opts?.noScope) {
       const hasAccess = await svc.hasPlantAccess(user.id, plantId);
       if (!hasAccess) {
         return reply.code(403).send({
@@ -104,7 +114,7 @@ export function authorize(
     }
 
     // ── Step 3: warehouse access check ─────────────────────────────────────
-    if (warehouseId) {
+    if (warehouseId && !opts?.noScope) {
       const hasAccess = await svc.hasWarehouseAccess(user.id, warehouseId);
       if (!hasAccess) {
         return reply.code(403).send({

@@ -54,6 +54,28 @@ export function PurchasePaymentsPage() {
     purchaseApi.invoices.list(company.id, { status: 'approved' }).then((r) => setInvoices(r.data)).catch(() => {});
   }, [company?.id]);
 
+  const selectedSupplierId = Form.useWatch('supplierId', form);
+
+  const availableInvoices = invoices.filter((i) => {
+    if (i.paymentStatus === 'paid') return false;
+    if (selectedSupplierId && i.supplierId !== selectedSupplierId) return false;
+    return true;
+  });
+
+  const handleInvoiceSelect = (key: number, invId: string) => {
+    const inv = invoices.find((i) => i.id === invId);
+    let amountRupees = 0;
+    if (inv) {
+      const paid = inv.paidAmountPaise ?? 0;
+      const duePaise = Math.max(0, inv.totalAmountPaise - paid);
+      amountRupees = duePaise / 100;
+    }
+    setAlloc(key, { invoiceId: invId, amountRupees });
+    if (inv?.supplierId && !form.getFieldValue('supplierId')) {
+      form.setFieldsValue({ supplierId: inv.supplierId });
+    }
+  };
+
   const setAlloc = (key: number, patch: Partial<DraftAllocation>) =>
     setAllocations((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
 
@@ -95,8 +117,12 @@ export function PurchasePaymentsPage() {
     {
       title: 'Invoice', key: 'inv', render: (_: any, a: DraftAllocation) => (
         <Select showSearch optionFilterProp="label" placeholder="Select invoice" style={{ width: '100%', minWidth: 240 }}
-          value={a.invoiceId} onChange={(v) => setAlloc(a.key, { invoiceId: v })}
-          options={invoices.map((i) => ({ value: i.id, label: `${i.documentNumber} — ${supplierName(i.supplierId)}` }))} />
+          value={a.invoiceId} onChange={(v) => handleInvoiceSelect(a.key, v)}
+          options={availableInvoices.map((i) => {
+            const paid = i.paidAmountPaise ?? 0;
+            const dueRupees = ((i.totalAmountPaise - paid) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            return { value: i.id, label: `${i.documentNumber} — ${supplierName(i.supplierId)} (Due: ₹${dueRupees})` };
+          })} />
       ),
     },
     {

@@ -54,6 +54,28 @@ export function SalesReceiptsPage() {
     salesApi.invoices.list(company.id, { status: 'approved' }).then((r) => setInvoices(r.data)).catch(() => {});
   }, [company?.id]);
 
+  const selectedCustomerId = Form.useWatch('customerId', form);
+
+  const availableInvoices = invoices.filter((i) => {
+    if (i.paymentStatus === 'paid') return false;
+    if (selectedCustomerId && i.customerId !== selectedCustomerId) return false;
+    return true;
+  });
+
+  const handleInvoiceSelect = (key: number, invId: string) => {
+    const inv = invoices.find((i) => i.id === invId);
+    let amountRupees = 0;
+    if (inv) {
+      const paid = inv.paidAmountPaise ?? inv.receivedAmountPaise ?? 0;
+      const duePaise = Math.max(0, inv.totalAmountPaise - paid);
+      amountRupees = duePaise / 100;
+    }
+    setAlloc(key, { invoiceId: invId, amountRupees });
+    if (inv?.customerId && !form.getFieldValue('customerId')) {
+      form.setFieldsValue({ customerId: inv.customerId });
+    }
+  };
+
   const setAlloc = (key: number, patch: Partial<DraftAllocation>) =>
     setAllocations((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
   const totalPaise = allocations.reduce((s, a) => s + Math.round((a.amountRupees || 0) * 100), 0);
@@ -94,8 +116,12 @@ export function SalesReceiptsPage() {
     {
       title: 'Invoice', key: 'inv', render: (_: any, a: DraftAllocation) => (
         <Select showSearch optionFilterProp="label" placeholder="Select invoice" style={{ width: '100%', minWidth: 240 }}
-          value={a.invoiceId} onChange={(v) => setAlloc(a.key, { invoiceId: v })}
-          options={invoices.map((i) => ({ value: i.id, label: `${i.documentNumber} — ${custName(i.customerId)}` }))} />
+          value={a.invoiceId} onChange={(v) => handleInvoiceSelect(a.key, v)}
+          options={availableInvoices.map((i) => {
+            const paid = i.paidAmountPaise ?? i.receivedAmountPaise ?? 0;
+            const dueRupees = ((i.totalAmountPaise - paid) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            return { value: i.id, label: `${i.documentNumber} — ${custName(i.customerId)} (Due: ₹${dueRupees})` };
+          })} />
       ),
     },
     { title: 'Amount ₹', key: 'amt', width: 160, render: (_: any, a: DraftAllocation) => (<InputNumber min={0} step={0.01} value={a.amountRupees} onChange={(v) => setAlloc(a.key, { amountRupees: Number(v) || 0 })} style={{ width: '100%' }} />) },

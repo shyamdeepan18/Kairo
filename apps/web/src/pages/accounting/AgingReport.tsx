@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Table, Typography, Card, Segmented, message } from 'antd';
 import { api } from '../../api/client';
 
@@ -8,19 +9,24 @@ interface AgingRecord {
   party_id: string;
   customer_name?: string;
   supplier_name?: string;
-  total_debit: number;
-  total_credit: number;
-  outstanding: number;
-  "0_30": number;
-  "31_60": number;
-  "61_90": number;
-  "90_plus": number;
+  total_debit: number | string;
+  total_credit: number | string;
+  outstanding: number | string;
+  "0_30": number | string;
+  "31_60": number | string;
+  "61_90": number | string;
+  "90_plus": number | string;
 }
 
 const AgingReport: React.FC = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const isAp = location.pathname.includes('ap-aging');
+  const type: 'AR' | 'AP' = isAp ? 'AP' : 'AR';
+
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<AgingRecord[]>([]);
-  const [type, setType] = useState<'AR' | 'AP'>('AR');
 
   useEffect(() => {
     fetchData(type);
@@ -40,9 +46,10 @@ const AgingReport: React.FC = () => {
     }
   };
 
-  const renderAmount = (val: number) => {
-    if (!val) return '-';
-    return (val / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const renderAmount = (val: number | string) => {
+    const num = Number(val) || 0;
+    if (num === 0) return '₹0.00';
+    return `₹${(num / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
   const columns = [
@@ -85,18 +92,21 @@ const AgingReport: React.FC = () => {
       dataIndex: 'outstanding', 
       key: 'outstanding', 
       align: 'right' as const,
-      render: (val: number) => <strong>{renderAmount(val)}</strong>
+      render: (val: number | string) => <strong>{renderAmount(val)}</strong>
     },
   ];
 
   return (
     <Card 
-      title={<Title level={3}>Aging Report</Title>} 
+      title={<Title level={3}>{type === 'AR' ? 'Accounts Receivable (AR) Aging' : 'Accounts Payable (AP) Aging'}</Title>} 
       extra={
         <Segmented 
-          options={['AR', 'AP']} 
+          options={[
+            { label: 'Receivables (AR)', value: 'AR' },
+            { label: 'Payables (AP)', value: 'AP' },
+          ]} 
           value={type} 
-          onChange={(val) => setType(val as 'AR' | 'AP')} 
+          onChange={(val) => navigate(`/accounting/${(val as string).toLowerCase()}-aging`)} 
         />
       }
     >

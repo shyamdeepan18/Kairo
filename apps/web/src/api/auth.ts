@@ -1,5 +1,11 @@
 import { api } from './client';
-import type { LoginResponse, RefreshResponse, AuthUser } from '@erp/shared';
+import type {
+  LoginResponse,
+  RefreshResponse,
+  AuthUser,
+  ContextOptionsResponse,
+  SelectContextResponse,
+} from '@erp/shared';
 
 export const authApi = {
   login: (email: string, password: string) =>
@@ -19,4 +25,11 @@ export const authApi = {
 
   getPermissions: (companyId?: string, plantId?: string) =>
     api.get<{ permissions: string[] }>('/auth/permissions', { params: { companyId, plantId } }).then((r) => r.data.permissions),
+
+  getContextOptions: () =>
+    api.get<ContextOptionsResponse>('/auth/context-options').then((r) => r.data),
+
+  selectContext: (companyId: string, plantId?: string | null) =>
+    api.post<SelectContextResponse>('/auth/select-context', { companyId, plantId }).then((r) => r.data),
 };
+

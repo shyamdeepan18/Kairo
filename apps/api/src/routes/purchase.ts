@@ -10,6 +10,7 @@ import {
   purchasePayments, purchasePaymentAllocations,
   approvalRequests,
   users,
+  plants, warehouses, items, taxCodes,
 } from '@erp/db';
 import {
   supplierCreateSchema, supplierUpdateSchema,
@@ -18,8 +19,11 @@ import {
   transitionSchema,
 } from '@erp/shared';
 import { authorize } from '../middleware/authorize.js';
-import { resolveCompany, companyId } from '../middleware/company-context.js';
+import { resolveTenantContext, tenant } from '../middleware/tenant-context.js';
+import { byTenantId } from '../db/tenant-query.js';
 import { requireModule } from '../middleware/require-module.js';
+import { stripServerOwned } from '../db/dto.js';
+import { assertOwned, assertAllOwned } from '../db/fk-ownership.js';
 import { fiscalPeriod, type PostingContext, type TaxLine } from '../services/posting-engine.js';
 import type { DocumentStatus } from '../services/status-engine.js';
 
@@ -30,11 +34,15 @@ import type { DocumentStatus } from '../services/status-engine.js';
  * GRN approval posts stock (StockLedgerService) + GL (PostingEngine: purchase.grn).
  * Invoice / Payment approval post GL (purchase.invoice / purchase.payment).
  *
- * Every write resolves the company via resolveCompany and is gated by authorize()
+ * Every write resolves the company via resolveTenantContext and is gated by authorize()
  * against the seeded purchase.* permissions. Document numbers come from
  * NumberSeriesService (seed with seedPurchaseNumberSeries() first).
  */
 export default async function purchaseRoutes(app: FastifyInstance) {
+  // Authenticate at the group level FIRST so the module gate below sees the
+  // trusted JWT context (request.user.activeCompanyId) instead of client input.
+  // Individual routes still run authenticate + resolveTenantContext + authorize.
+  app.addHook('preHandler', app.authenticate);
   app.addHook('preHandler', requireModule('purchase'));   // company must have the purchase module licensed
   registerSuppliers(app);
   registerRequisitions(app);
@@ -157,13 +165,13 @@ function paginate(query: Record<string, unknown>) {
 function registerSuppliers(app: FastifyInstance) {
   // Create
   app.post('/suppliers', {
-    preHandler: [app.authenticate, resolveCompany, authorize('settings.company.edit')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('settings.company.edit')],
   }, async (request, reply) => {
-    const parsed = supplierCreateSchema.safeParse(request.body);
+    const parsed = supplierCreateSchema.safeParse(stripServerOwned(request.body));
     if (!parsed.success) return bad(reply, parsed);
     const data = parsed.data;
     const [row] = await db.insert(suppliers).values({
-      companyId: data.companyId,
+      companyId: tenant(request).companyId,
       supplierCode: data.supplierCode,
       name: data.name,
       legalName: data.legalName,
@@ -187,9 +195,9 @@ function registerSuppliers(app: FastifyInstance) {
 
   // List
   app.get('/suppliers', {
-    preHandler: [app.authenticate, resolveCompany, authorize('purchase.po.view')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('purchase.po.view')],
   }, async (request) => {
-    const cid = companyId(request);
+    const cid = tenant(request).companyId;
     const { page, pageSize, limit, offset } = paginate(request.query as Record<string, unknown>);
     const data = await db.select().from(suppliers)
       .where(eq(suppliers.companyId, cid))
@@ -201,24 +209,25 @@ function registerSuppliers(app: FastifyInstance) {
 
   // Get one
   app.get('/suppliers/:id', {
-    preHandler: [app.authenticate, resolveCompany, authorize('purchase.po.view')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('purchase.po.view')],
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const [row] = await db.select().from(suppliers).where(eq(suppliers.id, id)).limit(1);
+    const [row] = await db.select().from(suppliers)
+      .where(byTenantId(suppliers, id, tenant(request).companyId)).limit(1);
     if (!row) return reply.code(404).send({ error: 'Supplier not found' });
     return row;
   });
 
   // Update
   app.patch('/suppliers/:id', {
-    preHandler: [app.authenticate, resolveCompany, authorize('settings.company.edit')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('settings.company.edit')],
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const parsed = supplierUpdateSchema.safeParse(request.body);
+    const parsed = supplierUpdateSchema.safeParse(stripServerOwned(request.body));
     if (!parsed.success) return bad(reply, parsed);
     const [row] = await db.update(suppliers)
       .set({ ...parsed.data, updatedBy: userId(request), updatedAt: new Date() })
-      .where(eq(suppliers.id, id)).returning();
+      .where(byTenantId(suppliers, id, tenant(request).companyId)).returning();
     if (!row) return reply.code(404).send({ error: 'Supplier not found' });
     return row;
   });
@@ -232,20 +241,27 @@ function registerRequisitions(app: FastifyInstance) {
   const DOC = 'purchase.requisition';
 
   app.post('/requisitions', {
-    preHandler: [app.authenticate, resolveCompany, authorize('purchase.requisition.create', { plantFrom: 'body.plantId' })],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('purchase.requisition.create', { plantFrom: 'body.plantId' })],
   }, async (request, reply) => {
-    const parsed = prCreateSchema.safeParse(request.body);
+    const parsed = prCreateSchema.safeParse(stripServerOwned(request.body));
     if (!parsed.success) return bad(reply, parsed);
     const d = parsed.data;
+    const cid = tenant(request).companyId;
+    await Promise.all([
+      assertOwned(plants, d.plantId, cid, 'Plant'),
+      assertAllOwned(items, d.lines.map((l) => l.itemId), cid, 'Item'),
+      assertAllOwned(warehouses, d.lines.map((l) => l.warehouseId), cid, 'Warehouse'),
+      assertAllOwned(suppliers, d.lines.map((l) => l.suggestedSupplierId), cid, 'Suggested supplier'),
+    ]);
     const { fiscalYear } = fiscalPeriod(new Date(d.postingDate));
 
     // Calculate total amount from lines for ApprovalEngine banding
     const totalAmountPaise = d.lines.reduce((acc, l) => acc + Math.round(l.quantity * (l.estimatedRatePaise || 0)), 0);
 
     const created = await db.transaction(async (tx) => {
-      const documentNumber = await app.numberSeriesService.next(tx, d.companyId, DOC, { fiscalYear, plantId: d.plantId });
+      const documentNumber = await app.numberSeriesService.next(tx, tenant(request).companyId, DOC, { fiscalYear, plantId: d.plantId });
       const [pr] = await tx.insert(purchaseRequisitions).values({
-        companyId: d.companyId, plantId: d.plantId, documentNumber, status: 'draft',
+        companyId: tenant(request).companyId, plantId: d.plantId, documentNumber, status: 'draft',
         fiscalYear, postingDate: d.postingDate as any, requiredByDate: d.requiredByDate as any,
         purpose: d.purpose, remarks: d.remarks, createdBy: userId(request),
         netAmountPaise: totalAmountPaise, totalAmountPaise,
@@ -259,7 +275,7 @@ function registerRequisitions(app: FastifyInstance) {
         }))
       );
       await app.auditEngine.logCreate(
-        { companyId: d.companyId, documentType: DOC, documentId: pr.id, documentNumber, performedBy: userId(request) },
+        { companyId: tenant(request).companyId, documentType: DOC, documentId: pr.id, documentNumber, performedBy: userId(request) },
         pr, { tx }
       );
       return pr;
@@ -268,9 +284,9 @@ function registerRequisitions(app: FastifyInstance) {
   });
 
   app.get('/requisitions/pending-lines', {
-    preHandler: [app.authenticate, resolveCompany, authorize('purchase.requisition.view')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('purchase.requisition.view')],
   }, async (request) => {
-    const cid = companyId(request);
+    const cid = tenant(request).companyId;
     const rows = await db.select({
       id: purchaseRequisitionLines.id,
       requisitionId: purchaseRequisitions.id,
@@ -296,11 +312,11 @@ function registerRequisitions(app: FastifyInstance) {
   });
 
   app.get('/requisitions', {
-    preHandler: [app.authenticate, resolveCompany, authorize('purchase.requisition.view')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('purchase.requisition.view')],
   }, async (request) => listHeaders(request, purchaseRequisitions, 'purchase.requisition'));
 
   app.get('/requisitions/:id', {
-    preHandler: [app.authenticate, resolveCompany, authorize('purchase.requisition.view')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('purchase.requisition.view')],
   }, async (request, reply) => getWithLines(request, reply, purchaseRequisitions, purchaseRequisitionLines, purchaseRequisitionLines.requisitionId, request.params as { id: string }, 'purchase.requisition'));
 
   // submit / approve / reject
@@ -317,19 +333,30 @@ function registerOrders(app: FastifyInstance) {
   const DOC = 'purchase.po';
 
   app.post('/orders', {
-    preHandler: [app.authenticate, resolveCompany, authorize('purchase.po.create', { plantFrom: 'body.plantId' })],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('purchase.po.create', { plantFrom: 'body.plantId' })],
   }, async (request, reply) => {
-    const parsed = poCreateSchema.safeParse(request.body);
+    const parsed = poCreateSchema.safeParse(stripServerOwned(request.body));
     if (!parsed.success) return bad(reply, parsed);
     const d = parsed.data;
+    const cid = tenant(request).companyId;
+    // Every client-supplied reference must belong to the active tenant.
+    await Promise.all([
+      assertOwned(plants, d.plantId, cid, 'Plant'),
+      assertOwned(suppliers, d.supplierId, cid, 'Supplier'),
+      assertOwned(purchaseRequisitions, d.requisitionId, cid, 'Requisition'),
+      assertOwned(warehouses, d.deliveryWarehouseId, cid, 'Delivery warehouse'),
+      assertAllOwned(items, d.lines.map((l) => l.itemId), cid, 'Item'),
+      assertAllOwned(taxCodes, d.lines.map((l) => l.taxCodeId), cid, 'Tax code'),
+      assertAllOwned(warehouses, d.lines.map((l) => l.warehouseId), cid, 'Warehouse'),
+    ]);
     const { fiscalYear } = fiscalPeriod(new Date(d.postingDate));
     const computed = d.lines.map((l) => computeLine(l));
     const totals = headerTotals(computed);
 
     const created = await db.transaction(async (tx) => {
-      const documentNumber = await app.numberSeriesService.next(tx, d.companyId, DOC, { fiscalYear, plantId: d.plantId });
+      const documentNumber = await app.numberSeriesService.next(tx, tenant(request).companyId, DOC, { fiscalYear, plantId: d.plantId });
       const [po] = await tx.insert(purchaseOrders).values({
-        companyId: d.companyId, plantId: d.plantId, documentNumber, status: 'draft',
+        companyId: tenant(request).companyId, plantId: d.plantId, documentNumber, status: 'draft',
         fiscalYear, postingDate: d.postingDate as any,
         supplierId: d.supplierId, requisitionId: d.requisitionId, supplierRef: d.supplierRef,
         expectedDeliveryDate: d.expectedDeliveryDate as any, paymentTermsDays: d.paymentTermsDays,
@@ -361,7 +388,7 @@ function registerOrders(app: FastifyInstance) {
       }
 
       await app.auditEngine.logCreate(
-        { companyId: d.companyId, documentType: DOC, documentId: po.id, documentNumber, performedBy: userId(request) },
+        { companyId: tenant(request).companyId, documentType: DOC, documentId: po.id, documentNumber, performedBy: userId(request) },
         po, { tx }
       );
       return po;
@@ -371,17 +398,29 @@ function registerOrders(app: FastifyInstance) {
 
 
   app.put('/orders/:id', {
-    preHandler: [app.authenticate, resolveCompany, authorize('purchase.po.create', { plantFrom: 'body.plantId' })],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('purchase.po.create', { plantFrom: 'body.plantId' })],
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const parsed = poCreateSchema.safeParse(request.body);
+    const parsed = poCreateSchema.safeParse(stripServerOwned(request.body));
     if (!parsed.success) return bad(reply, parsed);
     const d = parsed.data;
     
-    const [existing] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.id, id)).limit(1);
+    const cid = tenant(request).companyId;
+    const [existing] = await db.select().from(purchaseOrders)
+      .where(byTenantId(purchaseOrders, id, cid)).limit(1);
     if (!existing) return reply.code(404).send({ error: 'Not found' });
     if (existing.status !== 'draft') return reply.code(409).send({ error: 'Can only edit draft orders' });
-    
+
+    await Promise.all([
+      assertOwned(plants, d.plantId, cid, 'Plant'),
+      assertOwned(suppliers, d.supplierId, cid, 'Supplier'),
+      assertOwned(purchaseRequisitions, d.requisitionId, cid, 'Requisition'),
+      assertOwned(warehouses, d.deliveryWarehouseId, cid, 'Delivery warehouse'),
+      assertAllOwned(items, d.lines.map((l) => l.itemId), cid, 'Item'),
+      assertAllOwned(taxCodes, d.lines.map((l) => l.taxCodeId), cid, 'Tax code'),
+      assertAllOwned(warehouses, d.lines.map((l) => l.warehouseId), cid, 'Warehouse'),
+    ]);
+
     const computed = d.lines.map((l) => computeLine(l));
     const totals = headerTotals(computed);
 
@@ -394,7 +433,7 @@ function registerOrders(app: FastifyInstance) {
         isReverseCharge: d.isReverseCharge, remarks: d.remarks,
         netAmountPaise: totals.netAmountPaise, taxAmountPaise: totals.taxAmountPaise,
         totalAmountPaise: totals.totalAmountPaise, updatedBy: userId(request), updatedAt: new Date(),
-      }).where(eq(purchaseOrders.id, id)).returning();
+      }).where(byTenantId(purchaseOrders, id, cid)).returning();
       
       // We don't revert old PR ordered quantities here. For true accuracy we'd diff it, 
       // but in draft mode, standard practice is to just delete and recreate lines, 
@@ -446,24 +485,25 @@ function registerOrders(app: FastifyInstance) {
   });
 
   app.get('/orders', {
-    preHandler: [app.authenticate, resolveCompany, authorize('purchase.po.view')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('purchase.po.view')],
   }, async (request) => listHeaders(request, purchaseOrders, 'purchase.po'));
 
   app.get('/orders/:id', {
-    preHandler: [app.authenticate, resolveCompany, authorize('purchase.po.view')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('purchase.po.view')],
   }, async (request, reply) => getWithLines(request, reply, purchaseOrders, purchaseOrderLines, purchaseOrderLines.poId, request.params as { id: string }, 'purchase.po'));
 
   simpleTransition(app, { route: '/orders/:id/submit', table: purchaseOrders, docType: DOC, to: 'submitted', perm: 'purchase.po.submit' });
   
   app.post('/orders/:id/approve', {
-    preHandler: [app.authenticate, resolveCompany, authorize('purchase.po.approve')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('purchase.po.approve')],
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const remarks = transitionSchema.safeParse(request.body ?? {}).data?.remarks;
-    const cid = companyId(request);
+    const cid = tenant(request).companyId;
     const uid = userId(request);
     const bypassSod = await app.permissionService.check(uid, 'system.bypass_sod', cid);
-    const [row] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.id, id)).limit(1);
+    const [row] = await db.select().from(purchaseOrders)
+      .where(byTenantId(purchaseOrders, id, cid)).limit(1);
     if (!row) return reply.code(404).send({ error: 'Document not found' });
 
     // 1. Check ApprovalEngine first
@@ -473,7 +513,7 @@ function registerOrders(app: FastifyInstance) {
 
     if (req) {
       try {
-        const res = await db.transaction((tx) => app.approvalEngine.act(tx, req.id, uid, 'approved', remarks, { bypassSod, bypassSod }));
+        const res = await db.transaction((tx) => app.approvalEngine.act(tx, req.id, uid, 'approved', remarks, { companyId: cid, bypassSod }));
         if (!res.finalized) return reply.send({ ok: true, status: 'submitted', detail: res });
         return reply.send({ ok: true, status: 'approved' }); // Finalized, status already updated by ApprovalEngine
       } catch (err) {
@@ -505,10 +545,10 @@ function registerOrders(app: FastifyInstance) {
     }
   });
   app.post('/orders/:id/cancel', {
-    preHandler: [app.authenticate, resolveCompany, authorize('purchase.po.cancel')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('purchase.po.cancel')],
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const cid = companyId(request);
+    const cid = tenant(request).companyId;
 
     // Prevent cancellation if any non-cancelled GRN exists against this PO
     const [{ count }] = await db
@@ -549,11 +589,21 @@ function registerGrns(app: FastifyInstance) {
   const DOC = 'purchase.grn';
 
   app.post('/grns', {
-    preHandler: [app.authenticate, resolveCompany, authorize('purchase.grn.create', { plantFrom: 'body.plantId' })],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('purchase.grn.create', { plantFrom: 'body.plantId' })],
   }, async (request, reply) => {
-    const parsed = grnCreateSchema.safeParse(request.body);
+    const parsed = grnCreateSchema.safeParse(stripServerOwned(request.body));
     if (!parsed.success) return bad(reply, parsed);
     const d = parsed.data;
+    const cid = tenant(request).companyId;
+    await Promise.all([
+      assertOwned(plants, d.plantId, cid, 'Plant'),
+      assertOwned(suppliers, d.supplierId, cid, 'Supplier'),
+      assertOwned(purchaseOrders, d.poId, cid, 'Purchase order'),
+      assertOwned(warehouses, d.warehouseId, cid, 'Warehouse'),
+      assertAllOwned(items, d.lines.map((l) => l.itemId), cid, 'Item'),
+      assertAllOwned(taxCodes, d.lines.map((l) => l.taxCodeId), cid, 'Tax code'),
+      assertAllOwned(warehouses, d.lines.map((l) => l.warehouseId), cid, 'Warehouse'),
+    ]);
     const { fiscalYear } = fiscalPeriod(new Date(d.postingDate));
     // value GRN lines on acceptedQty
     const computed = d.lines.map((l) =>
@@ -562,9 +612,9 @@ function registerGrns(app: FastifyInstance) {
     const totals = headerTotals(computed);
 
     const created = await db.transaction(async (tx) => {
-      const documentNumber = await app.numberSeriesService.next(tx, d.companyId, DOC, { fiscalYear, plantId: d.plantId });
+      const documentNumber = await app.numberSeriesService.next(tx, tenant(request).companyId, DOC, { fiscalYear, plantId: d.plantId });
       const [grn] = await tx.insert(goodsReceiptNotes).values({
-        companyId: d.companyId, plantId: d.plantId, documentNumber, status: 'draft',
+        companyId: tenant(request).companyId, plantId: d.plantId, documentNumber, status: 'draft',
         fiscalYear, postingDate: d.postingDate as any, supplierId: d.supplierId, poId: d.poId,
         warehouseId: d.warehouseId, supplierDcNo: d.supplierDcNo, supplierDcDate: d.supplierDcDate as any,
         gateEntryNo: d.gateEntryNo, vehicleNo: d.vehicleNo, remarks: d.remarks,
@@ -582,7 +632,7 @@ function registerGrns(app: FastifyInstance) {
         }))
       );
       await app.auditEngine.logCreate(
-        { companyId: d.companyId, documentType: DOC, documentId: grn.id, documentNumber, performedBy: userId(request) },
+        { companyId: tenant(request).companyId, documentType: DOC, documentId: grn.id, documentNumber, performedBy: userId(request) },
         grn, { tx }
       );
       return grn;
@@ -591,26 +641,27 @@ function registerGrns(app: FastifyInstance) {
   });
 
   app.get('/grns', {
-    preHandler: [app.authenticate, resolveCompany, authorize('purchase.grn.view')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('purchase.grn.view')],
   }, async (request) => listHeaders(request, goodsReceiptNotes, 'purchase.grn'));
 
   app.get('/grns/:id', {
-    preHandler: [app.authenticate, resolveCompany, authorize('purchase.grn.view')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('purchase.grn.view')],
   }, async (request, reply) => getWithLines(request, reply, goodsReceiptNotes, goodsReceiptNoteLines, goodsReceiptNoteLines.grnId, request.params as { id: string }, 'purchase.grn'));
 
   simpleTransition(app, { route: '/grns/:id/submit', table: goodsReceiptNotes, docType: DOC, to: 'submitted', perm: 'purchase.grn.submit' });
 
   // Approve → post stock (purchase_receipt) + GL (purchase.grn), then update PO receipt status.
   app.post('/grns/:id/approve', {
-    preHandler: [app.authenticate, resolveCompany, authorize('purchase.grn.submit')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('purchase.grn.submit')],
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const remarks = transitionSchema.safeParse(request.body ?? {}).data?.remarks;
-    const cid = companyId(request);
+    const cid = tenant(request).companyId;
     const uid = userId(request);
     const bypassSod = await app.permissionService.check(uid, 'system.bypass_sod', cid);
 
-    const [grn] = await db.select().from(goodsReceiptNotes).where(eq(goodsReceiptNotes.id, id)).limit(1);
+    const [grn] = await db.select().from(goodsReceiptNotes)
+      .where(byTenantId(goodsReceiptNotes, id, cid)).limit(1);
     if (!grn) return reply.code(404).send({ error: 'GRN not found' });
     if (grn.status !== 'submitted') return reply.code(409).send({ error: `GRN must be submitted (is '${grn.status}')` });
 
@@ -625,7 +676,7 @@ function registerGrns(app: FastifyInstance) {
     try {
       const result = await db.transaction(async (tx) => {
         if (req) {
-          const actRes = await app.approvalEngine.act(tx, req.id, uid, 'approved', remarks, { skipFinalizeDoc: true, bypassSod, bypassSod });
+          const actRes = await app.approvalEngine.act(tx, req.id, uid, 'approved', remarks, { skipFinalizeDoc: true, companyId: cid, bypassSod });
           if (!actRes.finalized) {
             return { status: 'submitted', detail: actRes };
           }
@@ -667,7 +718,7 @@ function registerGrns(app: FastifyInstance) {
             }
           }
           await tx.update(purchaseOrders).set({ receiptStatus: 'partial', updatedAt: new Date() })
-            .where(eq(purchaseOrders.id, grn.poId));
+            .where(byTenantId(purchaseOrders, grn.poId, cid));
         }
         return { status: 'approved', journalEntryId: jeId };
       });
@@ -705,19 +756,27 @@ function registerInvoices(app: FastifyInstance) {
   const DOC = 'purchase.invoice';
 
   app.post('/invoices', {
-    preHandler: [app.authenticate, resolveCompany, authorize('purchase.invoice.create', { plantFrom: 'body.plantId' })],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('purchase.invoice.create', { plantFrom: 'body.plantId' })],
   }, async (request, reply) => {
-    const parsed = purchaseInvoiceCreateSchema.safeParse(request.body);
+    const parsed = purchaseInvoiceCreateSchema.safeParse(stripServerOwned(request.body));
     if (!parsed.success) return bad(reply, parsed);
     const d = parsed.data;
+    const cid = tenant(request).companyId;
+    await Promise.all([
+      assertOwned(plants, d.plantId, cid, 'Plant'),
+      assertOwned(suppliers, d.supplierId, cid, 'Supplier'),
+      assertOwned(purchaseOrders, d.poId, cid, 'Purchase order'),
+      assertAllOwned(items, d.lines.map((l) => l.itemId), cid, 'Item'),
+      assertAllOwned(taxCodes, d.lines.map((l) => l.taxCodeId), cid, 'Tax code'),
+    ]);
     const { fiscalYear } = fiscalPeriod(new Date(d.postingDate));
     const computed = d.lines.map((l) => computeLine(l));
     const totals = headerTotals(computed);
 
     const created = await db.transaction(async (tx) => {
-      const documentNumber = await app.numberSeriesService.next(tx, d.companyId, DOC, { fiscalYear, plantId: d.plantId });
+      const documentNumber = await app.numberSeriesService.next(tx, tenant(request).companyId, DOC, { fiscalYear, plantId: d.plantId });
       const [inv] = await tx.insert(purchaseInvoices).values({
-        companyId: d.companyId, plantId: d.plantId, documentNumber, status: 'draft', fiscalYear,
+        companyId: tenant(request).companyId, plantId: d.plantId, documentNumber, status: 'draft', fiscalYear,
         postingDate: d.postingDate as any, supplierId: d.supplierId, poId: d.poId,
         supplierInvoiceNumber: d.supplierInvoiceNumber, supplierInvoiceDate: d.supplierInvoiceDate as any,
         dueDate: d.dueDate as any, placeOfSupply: d.placeOfSupply, isReverseCharge: d.isReverseCharge,
@@ -737,7 +796,7 @@ function registerInvoices(app: FastifyInstance) {
         }))
       );
       await app.auditEngine.logCreate(
-        { companyId: d.companyId, documentType: DOC, documentId: inv.id, documentNumber, performedBy: userId(request) },
+        { companyId: tenant(request).companyId, documentType: DOC, documentId: inv.id, documentNumber, performedBy: userId(request) },
         inv, { tx }
       );
       return inv;
@@ -746,26 +805,27 @@ function registerInvoices(app: FastifyInstance) {
   });
 
   app.get('/invoices', {
-    preHandler: [app.authenticate, resolveCompany, authorize('purchase.invoice.view')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('purchase.invoice.view')],
   }, async (request) => listHeaders(request, purchaseInvoices, 'purchase.invoice'));
 
   app.get('/invoices/:id', {
-    preHandler: [app.authenticate, resolveCompany, authorize('purchase.invoice.view')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('purchase.invoice.view')],
   }, async (request, reply) => getWithLines(request, reply, purchaseInvoices, purchaseInvoiceLines, purchaseInvoiceLines.invoiceId, request.params as { id: string }, 'purchase.invoice'));
 
   simpleTransition(app, { route: '/invoices/:id/submit', table: purchaseInvoices, docType: DOC, to: 'submitted', perm: 'purchase.invoice.create' });
 
   // Approve → post GL (DR GR-IR / CR AP)
   app.post('/invoices/:id/approve', {
-    preHandler: [app.authenticate, resolveCompany, authorize('purchase.invoice.approve')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('purchase.invoice.approve')],
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const remarks = transitionSchema.safeParse(request.body ?? {}).data?.remarks;
-    const cid = companyId(request);
+    const cid = tenant(request).companyId;
     const uid = userId(request);
     const bypassSod = await app.permissionService.check(uid, 'system.bypass_sod', cid);
 
-    const [inv] = await db.select().from(purchaseInvoices).where(eq(purchaseInvoices.id, id)).limit(1);
+    const [inv] = await db.select().from(purchaseInvoices)
+      .where(byTenantId(purchaseInvoices, id, cid)).limit(1);
     if (!inv) return reply.code(404).send({ error: 'Invoice not found' });
     if (inv.status !== 'submitted') return reply.code(409).send({ error: `Invoice must be submitted (is '${inv.status}')` });
 
@@ -780,7 +840,7 @@ function registerInvoices(app: FastifyInstance) {
     try {
       const result = await db.transaction(async (tx) => {
         if (req) {
-          const actRes = await app.approvalEngine.act(tx, req.id, uid, 'approved', remarks, { skipFinalizeDoc: true, bypassSod, bypassSod });
+          const actRes = await app.approvalEngine.act(tx, req.id, uid, 'approved', remarks, { skipFinalizeDoc: true, companyId: cid, bypassSod });
           if (!actRes.finalized) {
             return { status: 'submitted', detail: actRes };
           }
@@ -801,7 +861,7 @@ function registerInvoices(app: FastifyInstance) {
         });
         if (inv.poId) {
           await tx.update(purchaseOrders).set({ billingStatus: 'partial', updatedAt: new Date() })
-            .where(eq(purchaseOrders.id, inv.poId));
+            .where(byTenantId(purchaseOrders, inv.poId, cid));
         }
         return { status: 'approved', journalEntryId: jeId };
       });
@@ -833,11 +893,17 @@ function registerPayments(app: FastifyInstance) {
   const DOC = 'purchase.payment';
 
   app.post('/payments', {
-    preHandler: [app.authenticate, resolveCompany, authorize('purchase.payment.create', { plantFrom: 'body.plantId' })],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('purchase.payment.create', { plantFrom: 'body.plantId' })],
   }, async (request, reply) => {
-    const parsed = purchasePaymentCreateSchema.safeParse(request.body);
+    const parsed = purchasePaymentCreateSchema.safeParse(stripServerOwned(request.body));
     if (!parsed.success) return bad(reply, parsed);
     const d = parsed.data;
+    const cid = tenant(request).companyId;
+    await Promise.all([
+      assertOwned(plants, d.plantId, cid, 'Plant'),
+      assertOwned(suppliers, d.supplierId, cid, 'Supplier'),
+      assertAllOwned(purchaseInvoices, d.allocations.map((a) => a.invoiceId), cid, 'Invoice'),
+    ]);
     const { fiscalYear } = fiscalPeriod(new Date(d.postingDate));
     const allocated = d.allocations.reduce((s, a) => s + a.allocatedAmountPaise, 0);
     if (allocated > d.paidAmountPaise) {
@@ -845,9 +911,9 @@ function registerPayments(app: FastifyInstance) {
     }
 
     const created = await db.transaction(async (tx) => {
-      const documentNumber = await app.numberSeriesService.next(tx, d.companyId, DOC, { fiscalYear, plantId: d.plantId });
+      const documentNumber = await app.numberSeriesService.next(tx, tenant(request).companyId, DOC, { fiscalYear, plantId: d.plantId });
       const [pay] = await tx.insert(purchasePayments).values({
-        companyId: d.companyId, plantId: d.plantId, documentNumber, status: 'draft', fiscalYear,
+        companyId: tenant(request).companyId, plantId: d.plantId, documentNumber, status: 'draft', fiscalYear,
         postingDate: d.postingDate as any, supplierId: d.supplierId, paymentMode: d.paymentMode,
         instrumentNo: d.instrumentNo, instrumentDate: d.instrumentDate as any, bankReference: d.bankReference,
         paidAmountPaise: d.paidAmountPaise, allocatedAmountPaise: allocated,
@@ -860,7 +926,7 @@ function registerPayments(app: FastifyInstance) {
         );
       }
       await app.auditEngine.logCreate(
-        { companyId: d.companyId, documentType: DOC, documentId: pay.id, documentNumber, performedBy: userId(request) },
+        { companyId: tenant(request).companyId, documentType: DOC, documentId: pay.id, documentNumber, performedBy: userId(request) },
         pay, { tx }
       );
       return pay;
@@ -869,14 +935,15 @@ function registerPayments(app: FastifyInstance) {
   });
 
   app.get('/payments', {
-    preHandler: [app.authenticate, resolveCompany, authorize('purchase.payment.view')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('purchase.payment.view')],
   }, async (request) => listHeaders(request, purchasePayments, 'purchase.payment'));
 
   app.get('/payments/:id', {
-    preHandler: [app.authenticate, resolveCompany, authorize('purchase.payment.view')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('purchase.payment.view')],
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const [row] = await db.select().from(purchasePayments).where(eq(purchasePayments.id, id)).limit(1);
+    const [row] = await db.select().from(purchasePayments)
+      .where(byTenantId(purchasePayments, id, tenant(request).companyId)).limit(1);
     if (!row) return reply.code(404).send({ error: 'Payment not found' });
     const allocations = await db.select().from(purchasePaymentAllocations).where(eq(purchasePaymentAllocations.paymentId, id));
     const doc = { ...row, allocations };
@@ -891,15 +958,16 @@ function registerPayments(app: FastifyInstance) {
 
   // Approve → post GL (DR AP / CR Bank) + apply allocations to invoices
   app.post('/payments/:id/approve', {
-    preHandler: [app.authenticate, resolveCompany, authorize('purchase.payment.approve')],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('purchase.payment.approve')],
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const remarks = transitionSchema.safeParse(request.body ?? {}).data?.remarks;
-    const cid = companyId(request);
+    const cid = tenant(request).companyId;
     const uid = userId(request);
     const bypassSod = await app.permissionService.check(uid, 'system.bypass_sod', cid);
 
-    const [pay] = await db.select().from(purchasePayments).where(eq(purchasePayments.id, id)).limit(1);
+    const [pay] = await db.select().from(purchasePayments)
+      .where(byTenantId(purchasePayments, id, cid)).limit(1);
     if (!pay) return reply.code(404).send({ error: 'Payment not found' });
     if (pay.status !== 'submitted') return reply.code(409).send({ error: `Payment must be submitted (is '${pay.status}')` });
 
@@ -914,7 +982,7 @@ function registerPayments(app: FastifyInstance) {
     try {
       const result = await db.transaction(async (tx) => {
         if (req) {
-          const actRes = await app.approvalEngine.act(tx, req.id, uid, 'approved', remarks, { skipFinalizeDoc: true, bypassSod, bypassSod });
+          const actRes = await app.approvalEngine.act(tx, req.id, uid, 'approved', remarks, { skipFinalizeDoc: true, companyId: cid, bypassSod });
           if (!actRes.finalized) {
             return { status: 'submitted', detail: actRes };
           }
@@ -934,13 +1002,15 @@ function registerPayments(app: FastifyInstance) {
         });
         // Apply allocations: bump invoice paidAmount + payment status
         for (const a of allocations) {
-          const [inv] = await tx.select().from(purchaseInvoices).where(eq(purchaseInvoices.id, a.invoiceId)).limit(1);
+          // Only allocate against an invoice in the same tenant.
+          const [inv] = await tx.select().from(purchaseInvoices)
+            .where(byTenantId(purchaseInvoices, a.invoiceId, cid)).limit(1);
           if (!inv) continue;
           const newPaid = inv.paidAmountPaise + a.allocatedAmountPaise;
           const status = newPaid >= inv.totalAmountPaise ? 'paid' : 'partial';
           await tx.update(purchaseInvoices)
             .set({ paidAmountPaise: newPaid, paymentStatus: status, updatedAt: new Date() })
-            .where(eq(purchaseInvoices.id, a.invoiceId));
+            .where(byTenantId(purchaseInvoices, a.invoiceId, cid));
         }
         return { status: 'approved', journalEntryId: jeId };
       });
@@ -955,7 +1025,7 @@ function registerPayments(app: FastifyInstance) {
 // ─── Generic list / get / simple-transition helpers ─────────────────────────
 
 async function listHeaders(request: FastifyRequest, table: any, docType?: string) {
-  const cid = companyId(request);
+  const cid = tenant(request).companyId;
   const q = request.query as Record<string, unknown>;
   const { page, pageSize, limit, offset } = paginate(q);
   const filters = [eq(table.companyId, cid)];
@@ -990,7 +1060,8 @@ async function getWithLines(
   params: { id: string },
   docType?: string
 ) {
-  const [header] = await db.select().from(table).where(eq(table.id, params.id)).limit(1);
+  const cid = tenant(request).companyId;
+  const [header] = await db.select().from(table).where(byTenantId(table, params.id, cid)).limit(1);
   if (!header) return reply.code(404).send({ error: 'Not found' });
   
   let createdByName: string | undefined = undefined;
@@ -1022,12 +1093,14 @@ function simpleTransition(
   cfg: { route: string; table: any; docType: string; to: DocumentStatus; perm: string }
 ) {
   app.post(cfg.route, {
-    preHandler: [app.authenticate, resolveCompany],
+    preHandler: [app.authenticate, resolveTenantContext],
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const remarks = transitionSchema.safeParse(request.body ?? {}).data?.remarks;
-    const cid = companyId(request);
-    const [row] = await db.select().from(cfg.table).where(eq(cfg.table.id, id)).limit(1);
+    const cid = tenant(request).companyId;
+    // Finding #3 fix: scope the document to the caller's company so a foreign
+    // document id can never be transitioned/approved into this tenant.
+    const [row] = await db.select().from(cfg.table).where(byTenantId(cfg.table, id, cid)).limit(1);
     if (!row) return reply.code(404).send({ error: 'Document not found' });
     const uid = userId(request);
     const bypassSod = await app.permissionService.check(uid, 'system.bypass_sod', cid);
@@ -1042,7 +1115,7 @@ function simpleTransition(
 
       if (req) {
         try {
-          const res = await db.transaction((tx) => app.approvalEngine.act(tx, req.id, uid, cfg.to as 'approved' | 'rejected', remarks, { bypassSod, bypassSod }));
+          const res = await db.transaction((tx) => app.approvalEngine.act(tx, req.id, uid, cfg.to as 'approved' | 'rejected', remarks, { companyId: cid, bypassSod }));
           if (res.finalized) return reply.send({ ok: true, status: res.decision });
           return reply.send({ ok: true, status: 'submitted', detail: res });
         } catch (err) {
