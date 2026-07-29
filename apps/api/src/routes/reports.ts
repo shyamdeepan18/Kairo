@@ -51,8 +51,8 @@ const reportsRoutes: FastifyPluginAsync = async (fastify) => {
           valuationRatePaise: stockLedgerEntries.valuationRatePaise,
           valuationAmountPaise: stockLedgerEntries.valuationAmountPaise,
           isReversal: stockLedgerEntries.isReversal,
-          itemCode: items.code,
-          itemName: items.name,
+          itemCode: items.itemCode,
+          itemName: items.itemName,
           warehouseName: warehouses.name,
         })
         .from(stockLedgerEntries)

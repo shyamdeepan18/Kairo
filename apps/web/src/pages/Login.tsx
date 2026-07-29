@@ -36,64 +36,24 @@ export function LoginPage() {
   };
 
   return (
-    <div
-      style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: isDark
-          ? '#191C24'
-          : 'linear-gradient(135deg, #EEF2FF 0%, #F0F9FF 50%, #F4F6FB 100%)',
-        padding: 24,
-      }}
-    >
+    <div className={`min-h-screen flex items-center justify-center p-6 transition-colors duration-300 ${isDark ? 'bg-[#191C24]' : 'bg-gradient-to-br from-indigo-50 via-sky-50 to-slate-50'}`}>
       {/* Card */}
-      <div
-        style={{
-          width: '100%',
-          maxWidth: 400,
-          background: dt.colorBgContainer,
-          borderRadius: 16,
-          boxShadow: isDark
-            ? '0 8px 32px rgba(0,0,0,0.4)'
-            : '0 8px 32px rgba(15,23,42,0.10)',
-          border: `1px solid ${dt.colorBorderSecondary}`,
-          overflow: 'hidden',
-        }}
-      >
+      <div className="w-full max-w-[400px] bg-white dark:bg-slate-800 rounded-2xl shadow-[0_8px_32px_rgba(15,23,42,0.10)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.4)] border border-slate-200 dark:border-slate-700 overflow-hidden">
         {/* Top accent bar */}
-        <div
-          style={{
-            height: 4,
-            background: 'linear-gradient(90deg, #4F46E5, #818CF8)',
-          }}
-        />
+        <div className="h-1 bg-gradient-to-r from-indigo-600 to-indigo-400" />
 
-        <div style={{ padding: '40px 40px 36px' }}>
+        <div className="px-10 pt-10 pb-9">
           {/* Logo + title */}
-          <div style={{ textAlign: 'center', marginBottom: 32 }}>
-            <div
-              style={{
-                width: 52,
-                height: 52,
-                borderRadius: 14,
-                background: 'linear-gradient(135deg, #4F46E5, #818CF8)',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: 16,
-                boxShadow: '0 4px 14px rgba(79,70,229,0.35)',
-              }}
-            >
-              <span style={{ color: '#fff', fontWeight: 700, fontSize: 22 }}>E</span>
+          <div className="text-center mb-8">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-600 to-indigo-400 inline-flex items-center justify-center mb-4 shadow-[0_4px_14px_rgba(79,70,229,0.35)]">
+              <span className="text-white font-bold text-2xl">E</span>
             </div>
-            <Title level={4} style={{ margin: 0, fontWeight: 700 }}>
+            <h1 className="m-0 font-bold text-xl text-slate-900 dark:text-white">
               Sign in to ERP
-            </Title>
-            <Text type="secondary" style={{ fontSize: 13, display: 'block', marginTop: 4 }}>
+            </h1>
+            <p className="text-sm text-slate-500 dark:text-slate-400 block mt-1 m-0">
               Manufacturing ERP for Indian SMEs
-            </Text>
+            </p>
           </div>
 
           {/* Error alert */}
@@ -122,44 +82,39 @@ export function LoginPage() {
           >
             <Form.Item
               name="email"
-              label={<Text style={{ fontSize: 13, fontWeight: 500 }}>Email or User ID</Text>}
+              label={<span className="text-[13px] font-medium text-slate-700 dark:text-slate-300">Email or User ID</span>}
               rules={[
                 { required: true, message: 'Email or User ID is required' },
               ]}
-              style={{ marginBottom: 16 }}
+              className="mb-4"
             >
               <Input
-                prefix={<MailOutlined style={{ color: dt.colorTextTertiary }} />}
+                prefix={<MailOutlined className="text-slate-400" />}
                 placeholder="you@company.com or User ID"
-                style={{ borderRadius: 8 }}
+                className="rounded-lg"
               />
             </Form.Item>
 
             <Form.Item
               name="password"
-              label={<Text style={{ fontSize: 13, fontWeight: 500 }}>Password</Text>}
+              label={<span className="text-[13px] font-medium text-slate-700 dark:text-slate-300">Password</span>}
               rules={[{ required: true, message: 'Password is required' }]}
-              style={{ marginBottom: 24 }}
+              className="mb-6"
             >
               <Input.Password
-                prefix={<LockOutlined style={{ color: dt.colorTextTertiary }} />}
+                prefix={<LockOutlined className="text-slate-400" />}
                 placeholder="••••••••"
-                style={{ borderRadius: 8 }}
+                className="rounded-lg"
               />
             </Form.Item>
 
-            <Form.Item style={{ marginBottom: 0 }}>
+            <Form.Item className="mb-0">
               <Button
                 type="primary"
                 htmlType="submit"
                 loading={loading}
                 block
-                style={{
-                  height: 42,
-                  borderRadius: 8,
-                  fontWeight: 600,
-                  fontSize: 14,
-                }}
+                className="h-[42px] rounded-lg font-semibold text-sm bg-indigo-600 hover:bg-indigo-700 border-none"
               >
                 Sign in
               </Button>
@@ -167,10 +122,10 @@ export function LoginPage() {
           </Form>
 
           {/* Footer note */}
-          <div style={{ textAlign: 'center', marginTop: 28 }}>
-            <Text type="secondary" style={{ fontSize: 12 }}>
+          <div className="text-center mt-7">
+            <p className="text-xs text-slate-500 dark:text-slate-400 m-0">
               Contact your administrator if you need access.
-            </Text>
+            </p>
           </div>
         </div>
       </div>

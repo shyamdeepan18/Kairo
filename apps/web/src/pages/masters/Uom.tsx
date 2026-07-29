@@ -22,6 +22,7 @@ export function UomPage() {
   const { confirmClose } = useUnsavedChanges();
   const { company } = usePlantStore();
   const { token: dt } = antTheme.useToken();
+  const [activeTab, setActiveTab] = useState('units');
   const [uomForm] = Form.useForm();
   const [convForm] = Form.useForm();
 
@@ -75,10 +76,7 @@ export function UomPage() {
     }
   };
 
-  const cardStyle = {
-    background: dt.colorBgContainer, borderRadius: 12,
-    border: `1px solid ${dt.colorBorderSecondary}`, overflow: 'hidden' as const,
-  };
+
 
   const uomColumns = [
     { title: 'Code', dataIndex: 'code', key: 'code', render: (v: string) => <Text strong style={{ fontFamily: 'monospace', fontSize: 13 }}>{v}</Text> },
@@ -131,23 +129,28 @@ export function UomPage() {
 
   return (
     <div>
-      <div style={{ marginBottom: 16 }}>
-        <Title level={4} style={{ margin: 0, fontWeight: 700 }}>Units of Measure</Title>
-        <Text type="secondary" style={{ fontSize: 13 }}>Standard and custom units, plus conversion factors.</Text>
+      <div className="mb-5 flex justify-between items-start">
+        <div>
+          <h2 className="m-0 font-bold text-lg text-slate-900 dark:text-white">Units of Measure</h2>
+          <span className="text-[13px] text-slate-500 dark:text-slate-400">Standard and custom units, plus conversion factors.</span>
+        </div>
+        {activeTab === 'units' ? (
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => { uomForm.resetFields(); setUomDrawer(true); }}>Add Unit</Button>
+        ) : (
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => { convForm.resetFields(); setConvDrawer(true); }}>Add Conversion</Button>
+        )}
       </div>
 
       <Tabs
-        defaultActiveKey="units"
+        activeKey={activeTab}
+        onChange={setActiveTab}
         items={[
           {
             key: 'units',
             label: 'Units',
             children: (
               <div>
-                <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-end' }}>
-                  <Button type="primary" icon={<PlusOutlined />} onClick={() => { uomForm.resetFields(); setUomDrawer(true); }}>Add Unit</Button>
-                </div>
-                <div style={cardStyle}>
+                <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
                   <Table dataSource={uoms} columns={uomColumns} rowKey="id" loading={loading}
                     pagination={{ pageSize: 25, hideOnSinglePage: true }} locale={{ emptyText: 'No units yet.' }} />
                 </div>
@@ -159,10 +162,7 @@ export function UomPage() {
             label: 'Conversions',
             children: (
               <div>
-                <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-end' }}>
-                  <Button type="primary" icon={<PlusOutlined />} onClick={() => { convForm.resetFields(); setConvDrawer(true); }}>Add Conversion</Button>
-                </div>
-                <div style={cardStyle}>
+                <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
                   <Table dataSource={conversions} columns={convColumns} rowKey="id" loading={loading}
                     pagination={{ pageSize: 25, hideOnSinglePage: true }} locale={{ emptyText: 'No conversions defined.' }} />
                 </div>

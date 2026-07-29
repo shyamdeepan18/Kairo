@@ -161,15 +161,15 @@ export function RequisitionsPage() {
   };
 
   const allReqsTab = (
-    <>
-      <div style={{ marginBottom: 16 }}><Select allowClear placeholder="All statuses" value={statusFilter} onChange={setStatusFilter} style={{ minWidth: 180 }} options={STATUS_OPTIONS} /></div>
+    <div className="pb-2">
+      <div className="mb-4"><Select allowClear placeholder="All statuses" value={statusFilter} onChange={setStatusFilter} style={{ minWidth: 180 }} options={STATUS_OPTIONS} /></div>
       <Table dataSource={rows} columns={columns} rowKey="id" loading={loading} pagination={{ pageSize: 20, hideOnSinglePage: true }} locale={{ emptyText: 'No requisitions yet.' }} />
-    </>
+    </div>
   );
 
   const pendingLinesTab = (
-    <>
-      <div style={{ marginBottom: 16, display: 'flex', gap: 16 }}>
+    <div className="pb-2">
+      <div className="mb-4 flex gap-4">
         <Button 
           type="primary" 
           disabled={selectedRowKeys.length === 0} 
@@ -187,24 +187,27 @@ export function RequisitionsPage() {
         pagination={{ pageSize: 20, hideOnSinglePage: true }} 
         locale={{ emptyText: 'No pending lines.' }} 
       />
-    </>
+    </div>
   );
 
   return (
     <div>
-      <div style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between' }}>
-        <div><Title level={4} style={{ margin: 0, fontWeight: 700 }}>Purchase Requisitions</Title><Text type="secondary" style={{ fontSize: 13 }}>{rows.length} requisition{rows.length !== 1 ? 's' : ''}</Text></div>
+      <div className="mb-5 flex justify-between items-start">
+        <div>
+          <h2 className="m-0 font-bold text-lg text-slate-900 dark:text-white">Purchase Requisitions</h2>
+          <span className="text-[13px] text-slate-500 dark:text-slate-400">{rows.length} requisition{rows.length !== 1 ? 's' : ''}</span>
+        </div>
         <Button type="primary" icon={<PlusOutlined />} onClick={openNew}>New Requisition</Button>
       </div>
-      <div style={cardStyle}>
+      <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
         <Tabs items={[
           { key: 'all', label: 'All Requisitions', children: allReqsTab },
           { key: 'pending', label: 'Pending PR Lines', children: pendingLinesTab },
-        ]} />
+        ]} className="px-4 pt-2" />
       </div>
       <Drawer title="New Requisition" open={drawer} onClose={async () => { if (await confirmClose(form)) { form.resetFields(); setDrawer(false); } }} width={820} extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>Create</Button>}>
         <Form form={form} layout="vertical" onFinish={save} requiredMark={false}>
-          <div style={{ display: 'flex', gap: 16 }}>
+          <div className="flex gap-4">
             <Form.Item name="postingDate" label="Date" rules={[{ required: true, message: 'Required' }]} style={{ width: 180 }}><DatePicker style={{ width: '100%' }} /></Form.Item>
             <Form.Item name="requiredByDate" label="Required By" style={{ width: 180 }}><DatePicker style={{ width: '100%' }} /></Form.Item>
           </div>
@@ -275,7 +278,7 @@ export function RequisitionsPage() {
         width={750}
       >
         {previewPR && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div className="flex flex-col gap-4 mt-4">
             <Descriptions size="small" bordered column={2}>
               <Descriptions.Item label="Date">{previewPR.postingDate}</Descriptions.Item>
               <Descriptions.Item label="Status"><StatusBadge status={previewPR.status as DocumentStatus} size="small" /></Descriptions.Item>
@@ -309,8 +312,8 @@ export function RequisitionsPage() {
         okText="Continue"
         okButtonProps={{ disabled: !selectedSupplierId }}
       >
-        <div style={{ paddingTop: 16, paddingBottom: 16 }}>
-          <Text style={{ display: 'block', marginBottom: 8 }}>Select the supplier you wish to raise a Purchase Order against for the selected lines:</Text>
+        <div className="py-4">
+          <span className="block mb-2 text-slate-700 dark:text-slate-300">Select the supplier you wish to raise a Purchase Order against for the selected lines:</span>
           <Select
             showSearch
             style={{ width: '100%' }}

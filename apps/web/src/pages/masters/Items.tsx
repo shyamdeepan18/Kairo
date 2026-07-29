@@ -97,10 +97,7 @@ export function ItemsPage() {
     }
   };
 
-  const cardStyle = {
-    background: dt.colorBgContainer, borderRadius: 12,
-    border: `1px solid ${dt.colorBorderSecondary}`, overflow: 'hidden' as const,
-  };
+
 
   const groupName = (id: string | null) => groups.find((g) => g.id === id)?.name ?? '—';
 
@@ -164,15 +161,15 @@ export function ItemsPage() {
 
   return (
     <div>
-      <div style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="mb-5 flex justify-between items-start">
         <div>
-          <Title level={4} style={{ margin: 0, fontWeight: 700 }}>Items</Title>
-          <Text type="secondary" style={{ fontSize: 13 }}>{items.length} item{items.length !== 1 ? 's' : ''}</Text>
+          <h2 className="m-0 font-bold text-lg text-slate-900 dark:text-white">Items</h2>
+          <span className="text-[13px] text-slate-500 dark:text-slate-400">{items.length} item{items.length !== 1 ? 's' : ''}</span>
         </div>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => open(null)}>Add Item</Button>
       </div>
 
-      <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+      <div className="flex flex-wrap gap-3 mb-4">
         <Input
           allowClear
           prefix={<SearchOutlined />}
@@ -191,7 +188,7 @@ export function ItemsPage() {
         />
       </div>
 
-      <div style={cardStyle}>
+      <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
         <Table
           dataSource={items}
           columns={columns}

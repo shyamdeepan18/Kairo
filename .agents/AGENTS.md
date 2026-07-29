@@ -1,12 +1,13 @@
-# Kairo ERP Agent Rules
+# UI & Design System Rules
 
-## Multi-Tenant Data Security (Company ID Filtering)
-The Kairo ERP is a Multi-Tenant SaaS application running on a single database. 
-- **CRITICAL RULE:** Every database `select`, `update`, or `delete` query must strictly filter by `company_id` whenever the table has a `company_id` column. 
-- You must never write a query that could accidentally expose, leak, or modify data belonging to another company.
-
-## Customer Customization Strategy
-Kairo is a monolithic application where all customers share the same API instance. 
-- **CRITICAL RULE:** Never fork the codebase or create separate API routes for a specific customer.
-- **Custom Fields:** If a customer requests custom data fields on a document (e.g., Sales Order), use the Document Engine's **L2 Custom Fields** (which stores data as JSONB) rather than altering the core database schema.
-- **Custom Features:** If a customer requests a completely custom feature or business rule, build it into the main codebase but hide it behind a **Feature Flag** or a **Company Plugin** that is only turned `on` for their specific `company_id`.
+**UI Implementation Rule**
+When building new UI components, features, or pages for this project:
+1. **MANDATORY**: ALWAYS use Tailwind CSS utility classes. 
+2. Do not use plain CSS or rely exclusively on Ant Design component stylings unless explicitly needed.
+3. Aim for a modern, "Interactive React" style:
+   - Use custom layouts with Tailwind (e.g., flexbox, grids).
+   - Use interactive elements like segmented controls over basic switches.
+   - Employ proper dual-theme aesthetics using Tailwind `dark:` variants everywhere (e.g., `bg-white dark:bg-slate-900`, `text-slate-900 dark:text-white`, `border-slate-200 dark:border-slate-700`).
+   - Never build a light-mode only component. Every color class must have a `dark:` counterpart.
+   - Use glassmorphism, glowing status pills, and trend indicators to make the UI look premium.
+   - Rely on Lucide icons for visual consistency.

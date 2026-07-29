@@ -108,28 +108,77 @@ export function LinesEditor({ lines, onChange, items, taxCodes, showTax = true, 
   const calc = (l: DraftLine) => computeDraft(l.quantity || 0, Math.round((l.rateRupees || 0) * 100), showDiscount ? (l.discountPercent || 0) : 0, showTax ? gstBp(l.taxCodeId) : 0);
   const totals = lines.reduce((a, l) => { const c = calc(l); a.net += c.netAmountPaise; a.tax += c.taxAmountPaise; a.total += c.totalAmountPaise; return a; }, { net: 0, tax: 0, total: 0 });
 
-  const cols: any[] = [
-    { title: 'Item', key: 'item', render: (_: any, l: DraftLine) => (<Select showSearch optionFilterProp="label" placeholder="Item" style={{ width: '100%', minWidth: 180 }} value={l.itemId} options={itemOptions} onChange={(v) => pick(l.key, v)} />) },
-    { title: 'Qty', key: 'qty', width: 90, render: (_: any, l: DraftLine) => (<InputNumber min={0} value={l.quantity} onChange={(v) => set(l.key, { quantity: Number(v) || 0 })} style={{ width: '100%' }} />) },
-    { title: 'UOM', key: 'uom', width: 80, render: (_: any, l: DraftLine) => (<Input value={l.uom} onChange={(e) => set(l.key, { uom: e.target.value })} />) },
-    { title: rateLabel, key: 'rate', width: 110, render: (_: any, l: DraftLine) => (<InputNumber min={0} step={0.01} value={l.rateRupees} onChange={(v) => set(l.key, { rateRupees: Number(v) || 0 })} style={{ width: '100%' }} />) },
-  ];
-  if (showDiscount) cols.push({ title: 'Disc %', key: 'disc', width: 80, render: (_: any, l: DraftLine) => (<InputNumber min={0} max={100} value={l.discountPercent} onChange={(v) => set(l.key, { discountPercent: Number(v) || 0 })} style={{ width: '100%' }} />) });
-  if (showTax) cols.push({ title: 'Tax', key: 'tax', width: 130, render: (_: any, l: DraftLine) => (<Select allowClear placeholder="Tax" style={{ width: '100%' }} value={l.taxCodeId} options={taxOptions} onChange={(v) => set(l.key, { taxCodeId: v })} />) });
-  cols.push({ title: 'Amount', key: 'amt', align: 'right', width: 110, render: (_: any, l: DraftLine) => <AmountDisplay paise={calc(l).totalAmountPaise} /> });
-  cols.push({ title: '', key: 'rm', width: 36, render: (_: any, l: DraftLine) => (<Button type="text" size="small" danger icon={<DeleteOutlined />} onClick={() => onChange(lines.filter((x) => x.key !== l.key))} />) });
-
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '8px 0' }}>
-        <Text strong>Line items</Text>
-        <Button size="small" icon={<PlusOutlined />} onClick={() => onChange([...lines, newDraftLine()])}>Add line</Button>
+    <div className="w-full">
+      <div className="border border-slate-200 dark:border-slate-700/50 overflow-x-auto m-0 border-t-0 border-l-0 border-r-0">
+        <table className="w-full text-sm text-left">
+          <thead className="bg-slate-50 dark:bg-slate-800/80 border-b dark:border-slate-700/50 text-xs text-slate-500 dark:text-slate-400 uppercase">
+            <tr>
+              <th className="px-4 py-3 font-bold min-w-[200px]">Item</th>
+              <th className="px-4 py-3 font-bold w-24">Qty</th>
+              <th className="px-4 py-3 font-bold w-24">UOM</th>
+              <th className="px-4 py-3 font-bold w-28">{rateLabel}</th>
+              {showDiscount && <th className="px-4 py-3 font-bold w-24">Disc %</th>}
+              {showTax && <th className="px-4 py-3 font-bold w-32">Tax</th>}
+              <th className="px-4 py-3 font-bold text-right w-32">Total</th>
+              <th className="px-4 py-3 font-bold w-12 text-center">
+                <Button type="text" size="small" icon={<PlusOutlined />} onClick={() => onChange([...lines, newDraftLine()])} className="text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300" />
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
+            {lines.map((l) => (
+              <tr key={l.key} className="bg-white dark:bg-slate-900 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
+                <td className="px-4 py-2">
+                  <Select showSearch optionFilterProp="label" placeholder="Item" style={{ width: '100%' }} value={l.itemId} options={itemOptions} onChange={(v) => pick(l.key, v)} />
+                </td>
+                <td className="px-4 py-2">
+                  <InputNumber min={0} value={l.quantity} onChange={(v) => set(l.key, { quantity: Number(v) || 0 })} style={{ width: '100%' }} />
+                </td>
+                <td className="px-4 py-2">
+                  <Input value={l.uom} onChange={(e) => set(l.key, { uom: e.target.value })} />
+                </td>
+                <td className="px-4 py-2">
+                  <InputNumber min={0} step={0.01} value={l.rateRupees} onChange={(v) => set(l.key, { rateRupees: Number(v) || 0 })} style={{ width: '100%' }} />
+                </td>
+                {showDiscount && (
+                  <td className="px-4 py-2">
+                    <InputNumber min={0} max={100} value={l.discountPercent} onChange={(v) => set(l.key, { discountPercent: Number(v) || 0 })} style={{ width: '100%' }} />
+                  </td>
+                )}
+                {showTax && (
+                  <td className="px-4 py-2">
+                    <Select allowClear placeholder="Tax" style={{ width: '100%' }} value={l.taxCodeId} options={taxOptions} onChange={(v) => set(l.key, { taxCodeId: v })} />
+                  </td>
+                )}
+                <td className="px-4 py-2 text-right font-mono font-bold text-slate-700 dark:text-slate-300">
+                  <AmountDisplay paise={calc(l).totalAmountPaise} />
+                </td>
+                <td className="px-4 py-2 text-center">
+                  <Button type="text" danger size="small" icon={<DeleteOutlined />} onClick={() => onChange(lines.filter((x) => x.key !== l.key))} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
-      <Table dataSource={lines} columns={cols} rowKey="key" pagination={false} size="small" />
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 28, marginTop: 8 }}>
-        <span><Text type="secondary">Net </Text><AmountDisplay paise={totals.net} /></span>
-        {showTax && <span><Text type="secondary">Tax </Text><AmountDisplay paise={totals.tax} /></span>}
-        <span><Text type="secondary">Total </Text><AmountDisplay paise={totals.total} bold /></span>
+      <div className="flex justify-end mt-4 p-4 mr-4 mb-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700/50">
+        <div className="flex gap-8 text-sm">
+          <div className="flex flex-col items-end">
+            <span className="text-slate-500 dark:text-slate-400 font-medium">Net Amount</span>
+            <span className="font-mono text-slate-700 dark:text-slate-300"><AmountDisplay paise={totals.net} /></span>
+          </div>
+          {showTax && (
+            <div className="flex flex-col items-end">
+              <span className="text-slate-500 dark:text-slate-400 font-medium">Tax Amount</span>
+              <span className="font-mono text-slate-700 dark:text-slate-300"><AmountDisplay paise={totals.tax} /></span>
+            </div>
+          )}
+          <div className="flex flex-col items-end">
+            <span className="text-slate-900 dark:text-white font-bold">Total Amount</span>
+            <span className="font-mono text-lg font-black text-slate-900 dark:text-white"><AmountDisplay paise={totals.total} /></span>
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -114,19 +114,15 @@ function PartyDetail({ kind }: { kind: Kind }) {
     }
   };
 
-  const cardStyle = {
-    background: dt.colorBgContainer, borderRadius: 12,
-    border: `1px solid ${dt.colorBorderSecondary}`, padding: '24px 28px 28px',
-  };
   const sectionLabel = { fontSize: 12, textTransform: 'uppercase' as const, letterSpacing: '0.5px', fontWeight: 600 };
 
   if (loading) return <div style={{ textAlign: 'center', padding: 80 }}><Spin size="large" /></div>;
   if (!party) return null;
 
   const detailsTab = (
-    <div style={cardStyle}>
+    <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-6 md:p-8 shadow-sm">
       <>
-        <Text type="secondary" style={{ ...sectionLabel, display: 'block', marginBottom: 16 }}>General</Text>
+        <span className="block mb-4 text-xs font-semibold tracking-wide uppercase text-slate-500 dark:text-slate-400">General</span>
         <Row gutter={20}>
           <Col xs={24} sm={8}>
             <Form.Item name={codeField} label={`${noun} Code`}><Input disabled style={{ fontFamily: 'monospace' }} /></Form.Item>
@@ -143,8 +139,8 @@ function PartyDetail({ kind }: { kind: Kind }) {
           <Col xs={24} sm={12}><Form.Item name="email" label="Email" rules={[{ type: 'email' }]}><Input /></Form.Item></Col>
         </Row>
 
-        <Divider style={{ margin: '4px 0 20px' }} />
-        <Text type="secondary" style={{ ...sectionLabel, display: 'block', marginBottom: 16 }}>Tax {isSupplier && '& Address'}</Text>
+        <Divider className="my-5" />
+        <span className="block mb-4 text-xs font-semibold tracking-wide uppercase text-slate-500 dark:text-slate-400">Tax {isSupplier && '& Address'}</span>
         <Row gutter={20}>
           <Col xs={24} sm={10}>
             <Form.Item name="gstin" label="GSTIN" rules={[{ len: 15, message: '15 characters' }]}>
@@ -171,8 +167,8 @@ function PartyDetail({ kind }: { kind: Kind }) {
           )}
         </Row>
 
-        <Divider style={{ margin: '4px 0 20px' }} />
-        <Text type="secondary" style={{ ...sectionLabel, display: 'block', marginBottom: 16 }}>Commercial</Text>
+        <Divider className="my-5" />
+        <span className="block mb-4 text-xs font-semibold tracking-wide uppercase text-slate-500 dark:text-slate-400">Commercial</span>
         <Row gutter={20}>
           <Col xs={24} sm={8}><Form.Item name="paymentTermsDays" label="Payment Terms (days)"><InputNumber min={0} max={365} style={{ width: '100%' }} /></Form.Item></Col>
           <Col xs={24} sm={8}><Form.Item name="creditLimitRupees" label="Credit Limit (₹)"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
@@ -193,7 +189,7 @@ function PartyDetail({ kind }: { kind: Kind }) {
   );
 
   const bankTab = (
-    <div style={cardStyle}>
+    <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-6 md:p-8 shadow-sm">
       <>
         <Row gutter={20}>
           <Col xs={24} sm={12}><Form.Item name="bankAccountName" label="Account Holder Name"><Input /></Form.Item></Col>
@@ -230,8 +226,8 @@ function PartyDetail({ kind }: { kind: Kind }) {
   ];
 
   const contactsTab = isSupplier ? (
-    <div style={cardStyle}>
-      <Text type="secondary" style={{ ...sectionLabel, display: 'block', marginBottom: 16 }}>Primary Contact</Text>
+    <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-6 md:p-8 shadow-sm">
+      <span className="block mb-4 text-xs font-semibold tracking-wide uppercase text-slate-500 dark:text-slate-400">Primary Contact</span>
       <Row gutter={[20, 8]}>
         <Col span={8}><Text type="secondary" style={{ fontSize: 12 }}>Contact Person</Text><br /><Text strong>{party.contactPerson ?? '—'}</Text></Col>
         <Col span={8}><Text type="secondary" style={{ fontSize: 12 }}>Phone</Text><br /><Text strong>{party.phone ?? '—'}</Text></Col>
@@ -240,10 +236,10 @@ function PartyDetail({ kind }: { kind: Kind }) {
     </div>
   ) : (
     <div>
-      <div style={{ marginBottom: 14, display: 'flex', justifyContent: 'flex-end' }}>
+      <div className="mb-4 flex justify-end">
         <Button icon={<PlusOutlined />} onClick={() => { addrForm.resetFields(); setAddrDrawer(true); }}>Add Address</Button>
       </div>
-      <div style={{ background: dt.colorBgContainer, borderRadius: 12, border: `1px solid ${dt.colorBorderSecondary}`, overflow: 'hidden' }}>
+      <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
         <Table dataSource={addresses} columns={addrColumns} rowKey="id" pagination={false}
           locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No addresses yet" /> }} />
       </div>
@@ -259,7 +255,7 @@ function PartyDetail({ kind }: { kind: Kind }) {
   ];
 
   const transactionsTab = (
-    <div style={{ background: dt.colorBgContainer, borderRadius: 12, border: `1px solid ${dt.colorBorderSecondary}`, overflow: 'hidden' }}>
+    <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
       <Table dataSource={txns} columns={txnColumns} rowKey={(r) => `${r.kind}-${r.documentNumber}`} loading={txnLoading}
         pagination={{ pageSize: 25, hideOnSinglePage: true }}
         locale={{ emptyText: 'No transactions for this ' + noun.toLowerCase() + '.' }} />
@@ -270,12 +266,12 @@ function PartyDetail({ kind }: { kind: Kind }) {
     <div>
       <Button type="text" icon={<ArrowLeftOutlined />} onClick={async () => {
         if (await confirmClose(form, { content: 'You have unsaved changes on this page. Leave anyway?' })) navigate(`/masters/${kind}s`);
-      }} style={{ marginBottom: 8, paddingLeft: 0 }}>
+      }} className="mb-2 -ml-3 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300">
         Back to {noun}s
       </Button>
-      <div style={{ marginBottom: 20, display: 'flex', alignItems: 'center', gap: 12 }}>
-        <Title level={4} style={{ margin: 0, fontWeight: 700 }}>{party.name}</Title>
-        <Text type="secondary" style={{ fontFamily: 'monospace' }}>{(party as any)[codeField]}</Text>
+      <div className="mb-6 flex items-center gap-3">
+        <h2 className="m-0 font-bold text-lg text-slate-900 dark:text-white">{party.name}</h2>
+        <span className="text-slate-500 dark:text-slate-400 font-mono text-[13px]">{(party as any)[codeField]}</span>
         <Tag color={party.isActive ? 'success' : 'default'} style={{ borderRadius: 10, border: 0, fontSize: 11 }}>
           {party.isActive ? 'Active' : 'Inactive'}
         </Tag>

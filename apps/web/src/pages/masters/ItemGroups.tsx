@@ -80,10 +80,7 @@ export function ItemGroupsPage() {
     }
   };
 
-  const cardStyle = {
-    background: dt.colorBgContainer, borderRadius: 12,
-    border: `1px solid ${dt.colorBorderSecondary}`, overflow: 'hidden' as const,
-  };
+
 
   // A group can be a parent of another only if it isn't the node being edited.
   const parentOptions = groups
@@ -122,15 +119,15 @@ export function ItemGroupsPage() {
 
   return (
     <div>
-      <div style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="mb-5 flex justify-between items-start">
         <div>
-          <Title level={4} style={{ margin: 0, fontWeight: 700 }}>Item Groups</Title>
-          <Text type="secondary" style={{ fontSize: 13 }}>Hierarchical classification for reporting and defaults.</Text>
+          <h2 className="m-0 font-bold text-lg text-slate-900 dark:text-white">Item Groups</h2>
+          <span className="text-[13px] text-slate-500 dark:text-slate-400">Hierarchical classification for reporting and defaults.</span>
         </div>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => open(null)}>Add Group</Button>
       </div>
 
-      <div style={cardStyle}>
+      <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
         <Table
           dataSource={tree}
           columns={columns}

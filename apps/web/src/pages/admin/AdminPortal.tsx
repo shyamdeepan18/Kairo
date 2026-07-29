@@ -21,6 +21,7 @@ import { useThemeStore } from '../../store/theme';
 import dayjs from 'dayjs';
 import { ChangePasswordModal } from '../../components/ChangePasswordModal';
 import { DiagnosticsPanel } from './DiagnosticsPanel';
+import { InteractiveRoles } from './components/InteractiveRoles';
 
 const { Sider, Content, Header } = Layout;
 const { Title, Text } = Typography;
@@ -708,74 +709,8 @@ export function AdminPortalPage() {
 
           {/* ── Roles & Permissions ────────────────────────────────────────── */}
           {section === 'roles' && selectedCompany && (
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                <div>
-                  <Title level={4} style={{ margin: 0, }}>
-                    <SafetyOutlined style={{ marginRight: 8, color: '#10B981' }} />
-                    Roles & Permissions — {selectedCompany.name}
-                  </Title>
-                  <Text style={{ color: 'var(--ant-color-text-secondary)', fontSize: 13 }}>
-                    Manage built-in system roles and create custom role permission packages for this company.
-                  </Text>
-                </div>
-                <Button type="primary" icon={<PlusOutlined />}
-                  style={{ background: '#10B981', borderColor: '#10B981', fontWeight: 600 }}
-                  onClick={() => { newRoleForm.resetFields(); setNewRoleModal(true); }}>
-                  Create Custom Role
-                </Button>
-              </div>
-
-              <Table
-                dataSource={roles}
-                rowKey="id"
-                loading={rolesLoading}
-                pagination={false}
-                style={{ borderRadius: 12, overflow: 'hidden' }}
-                columns={[
-                  {
-                    title: 'Role Name', key: 'name',
-                    render: (_: any, r: AdminRole) => (
-                      <Space>
-                        <Avatar size={32} style={{ background: r.isSystemRole ? '#6366F1' : '#10B981' }}>
-                          {r.isSystemRole ? <LockOutlined /> : <SafetyOutlined />}
-                        </Avatar>
-                        <div>
-                          <Text strong style={{ display: 'block' }}>{r.name}</Text>
-                          <Text style={{ fontSize: 12, color: 'var(--ant-color-text-secondary)', }}>{r.description ?? 'No description'}</Text>
-                        </div>
-                      </Space>
-                    ),
-                  },
-                  {
-                    title: 'Role Type', key: 'type', width: 180,
-                    render: (_: any, r: AdminRole) => (
-                      <Tag color={r.isSystemRole ? 'purple' : 'cyan'} style={{ borderRadius: 10, border: 0 }}>
-                        {r.isSystemRole ? '🔒 System Role (Global)' : '✨ Custom Role'}
-                      </Tag>
-                    ),
-                  },
-                  {
-                    title: 'Actions', key: 'actions', width: 220,
-                    render: (_: any, r: AdminRole) => (
-                      <Space>
-                        <Button size="small" icon={r.isSystemRole ? <LockOutlined /> : <EditOutlined />}
-                          onClick={() => openEditRolePermissions(r)}>
-                          {r.isSystemRole ? 'View Rights' : 'Edit Rights'}
-                        </Button>
-                        {!r.isSystemRole && (
-                          <Popconfirm title="Delete this custom role?"
-                            description="Users assigned to this role will lose its permissions."
-                            onConfirm={() => handleDeleteRole(r.id)}
-                            okText="Delete" okButtonProps={{ danger: true }}>
-                            <Button size="small" danger icon={<DeleteOutlined />} />
-                          </Popconfirm>
-                        )}
-                      </Space>
-                    ),
-                  },
-                ]}
-              />
+            <div style={{ height: 'calc(100vh - 108px)', minHeight: 600 }}>
+              <InteractiveRoles companyId={selectedCompany.id} />
             </div>
           )}
 

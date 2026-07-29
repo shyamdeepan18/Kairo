@@ -104,10 +104,7 @@ function PartyPage({ kind }: PartyPageProps) {
     }
   };
 
-  const cardStyle = {
-    background: dt.colorBgContainer, borderRadius: 12,
-    border: `1px solid ${dt.colorBorderSecondary}`, overflow: 'hidden' as const,
-  };
+
 
   const codeField = isSupplier ? 'supplierCode' : 'customerCode';
   const typeField = `${kind}Type`;
@@ -167,10 +164,10 @@ function PartyPage({ kind }: PartyPageProps) {
 
   return (
     <div>
-      <div style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="mb-5 flex justify-between items-start">
         <div>
-          <Title level={4} style={{ margin: 0, fontWeight: 700 }}>{noun}s</Title>
-          <Text type="secondary" style={{ fontSize: 13 }}>{rows.length} {noun.toLowerCase()}{rows.length !== 1 ? 's' : ''}</Text>
+          <h2 className="m-0 font-bold text-lg text-slate-900 dark:text-white">{noun}s</h2>
+          <span className="text-[13px] text-slate-500 dark:text-slate-400">{rows.length} {noun.toLowerCase()}{rows.length !== 1 ? 's' : ''}</span>
         </div>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => open(null)}>Add {noun}</Button>
       </div>
@@ -181,10 +178,10 @@ function PartyPage({ kind }: PartyPageProps) {
         placeholder={`Search by name, code or GSTIN…`}
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        style={{ marginBottom: 16, maxWidth: 420 }}
+        className="mb-4 max-w-[420px]"
       />
 
-      <div style={cardStyle}>
+      <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
         <Table
           dataSource={rows}
           columns={columns}

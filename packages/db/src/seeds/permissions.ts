@@ -165,6 +165,14 @@ const PERMISSIONS = [
   // ── Admin (Phase 9) ────────────────────────────────────────────────────────
   { code: 'admin.system.manage',          module: 'admin',   documentType: 'system',        action: 'manage',  label: 'Manage global system settings' },
   { code: 'system.bypass_sod',            module: 'admin',   documentType: 'system',        action: 'bypass_sod', label: 'Bypass Segregation of Duties (Maker/Checker)' },
+
+  // ── Field-Level Security ───────────────────────────────────────────────────
+  { code: 'field.purchase_cost.view',     module: 'system',  documentType: 'field',         action: 'view',    label: 'View Purchase Cost Price (PTR)' },
+  { code: 'field.customer_phone.view',    module: 'system',  documentType: 'field',         action: 'view',    label: 'View Full Customer Phone' },
+  { code: 'field.customer_phone.mask',    module: 'system',  documentType: 'field',         action: 'mask',    label: 'Mask Customer Phone' },
+  { code: 'field.unit_mrp.edit',          module: 'system',  documentType: 'field',         action: 'edit',    label: 'Edit Unit MRP' },
+  { code: 'field.item_discount.edit',     module: 'system',  documentType: 'field',         action: 'edit',    label: 'Edit Item Discount' },
+  { code: 'field.stock_write_off.execute', module: 'system', documentType: 'field',         action: 'execute', label: 'Execute Stock Write-off' },
 ];
 
 // ─── System role definitions ─────────────────────────────────────────────────

@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   Layout, Menu, Avatar, Dropdown, Typography, Button, Drawer, Tooltip,
-  Grid, theme as antTheme,
+  Grid, theme as antTheme, Badge, Popover, List
 } from 'antd';
 import {
   DashboardOutlined,
@@ -24,7 +24,11 @@ import {
   EnvironmentOutlined,
   RightOutlined,
   KeyOutlined,
+  BellOutlined,
 } from '@ant-design/icons';
+import {
+  Building2, Users, Package, FolderTree, Ruler, FileText, FileSignature, Truck, Receipt, CreditCard, ShoppingCart, PackageCheck, Banknote, Scale, BookOpen, Edit3, ArrowRightLeft, Layers, Barcode, ListTree, Factory, Cog, TrendingUp, Landmark, Clock, Percent, BarChart2, LineChart, PieChart, Activity, DollarSign, Building, Warehouse, Hash, Network, Printer, Plug, Shield, ShieldCheck, Sliders
+} from 'lucide-react';
 import { useAuthStore } from '../store/auth';
 import { useThemeStore } from '../store/theme';
 import { usePlantStore } from '../store/plant';
@@ -32,6 +36,10 @@ import { usePermissionStore } from '../store/permission';
 import { authApi } from '../api/auth';
 import { ChangePasswordModal } from '../components/ChangePasswordModal';
 import { AccessDenied } from '../components/AccessDenied';
+import { CommandPalette } from '../components/CommandPalette';
+import { WorkspaceTabs } from '../components/WorkspaceTabs';
+import { SwipeToCloseLogo } from '../components/SwipeToCloseLogo';
+import { useWorkspaceStore } from '../store/workspace';
 
 const { Header, Sider, Content } = Layout;
 const { Text } = Typography;
@@ -39,7 +47,7 @@ const { useBreakpoint } = Grid;
 
 // ─── Navigation tree ─────────────────────────────────────────────────────────
 
-interface NavItem {
+export interface NavItem {
   key: string;
   icon?: React.ReactNode;
   label: string;
@@ -47,7 +55,7 @@ interface NavItem {
   children?: NavItem[];
 }
 
-const NAV_ITEMS: NavItem[] = [
+export const NAV_ITEMS: NavItem[] = [
   {
     key: '/dashboard',
     icon: <DashboardOutlined />,
@@ -59,11 +67,11 @@ const NAV_ITEMS: NavItem[] = [
     label: 'Masters',
     perms: ['inventory.items.view', 'inventory.items.create', 'purchase.supplier.view', 'sales.customer.view'],
     children: [
-      { key: '/masters/suppliers',   label: 'Suppliers', perms: ['purchase.supplier.view'] },
-      { key: '/masters/customers',   label: 'Customers', perms: ['sales.customer.view'] },
-      { key: '/masters/items',       label: 'Items', perms: ['inventory.items.view', 'inventory.items.create'] },
-      { key: '/masters/item-groups', label: 'Item Groups', perms: ['inventory.items.view'] },
-      { key: '/masters/uom',         label: 'Units of Measure', perms: ['inventory.items.view'] },
+      { key: '/masters/suppliers',   icon: <Building2 size={16} />, label: 'Suppliers', perms: ['purchase.supplier.view'] },
+      { key: '/masters/customers',   icon: <Users size={16} />, label: 'Customers', perms: ['sales.customer.view'] },
+      { key: '/masters/items',       icon: <Package size={16} />, label: 'Items', perms: ['inventory.items.view', 'inventory.items.create'] },
+      { key: '/masters/item-groups', icon: <FolderTree size={16} />, label: 'Item Groups', perms: ['inventory.items.view'] },
+      { key: '/masters/uom',         icon: <Ruler size={16} />, label: 'Units of Measure', perms: ['inventory.items.view'] },
     ],
   },
   {
@@ -72,11 +80,11 @@ const NAV_ITEMS: NavItem[] = [
     label: 'Purchase',
     perms: ['purchase.requisition.view', 'purchase.po.view', 'purchase.grn.view', 'purchase.invoice.view', 'purchase.payment.view', 'purchase.payment.create'],
     children: [
-      { key: '/purchase/requisitions', label: 'Requisitions', perms: ['purchase.requisition.view'] },
-      { key: '/purchase/orders',       label: 'Purchase Orders', perms: ['purchase.po.view'] },
-      { key: '/purchase/grn',          label: 'GRN', perms: ['purchase.grn.view'] },
-      { key: '/purchase/invoices',     label: 'Invoices', perms: ['purchase.invoice.view'] },
-      { key: '/purchase/payments',     label: 'Payments', perms: ['purchase.payment.view', 'purchase.payment.create'] },
+      { key: '/purchase/requisitions', icon: <FileText size={16} />, label: 'Requisitions', perms: ['purchase.requisition.view'] },
+      { key: '/purchase/orders',       icon: <FileSignature size={16} />, label: 'Purchase Orders', perms: ['purchase.po.view'] },
+      { key: '/purchase/grn',          icon: <Truck size={16} />, label: 'GRN', perms: ['purchase.grn.view'] },
+      { key: '/purchase/invoices',     icon: <Receipt size={16} />, label: 'Invoices', perms: ['purchase.invoice.view'] },
+      { key: '/purchase/payments',     icon: <CreditCard size={16} />, label: 'Payments', perms: ['purchase.payment.view', 'purchase.payment.create'] },
     ],
   },
   {
@@ -85,11 +93,11 @@ const NAV_ITEMS: NavItem[] = [
     label: 'Sales',
     perms: ['sales.quotation.view', 'sales.so.view', 'sales.delivery.view', 'sales.invoice.view', 'sales.receipt.view'],
     children: [
-      { key: '/sales/quotations', label: 'Quotations', perms: ['sales.quotation.view'] },
-      { key: '/sales/orders',     label: 'Sales Orders', perms: ['sales.so.view'] },
-      { key: '/sales/delivery',   label: 'Deliveries', perms: ['sales.delivery.view'] },
-      { key: '/sales/invoices',   label: 'Invoices', perms: ['sales.invoice.view'] },
-      { key: '/sales/receipts',   label: 'Receipts', perms: ['sales.receipt.view'] },
+      { key: '/sales/quotations', icon: <FileSignature size={16} />, label: 'Quotations', perms: ['sales.quotation.view'] },
+      { key: '/sales/orders',     icon: <ShoppingCart size={16} />, label: 'Sales Orders', perms: ['sales.so.view'] },
+      { key: '/sales/delivery',   icon: <PackageCheck size={16} />, label: 'Deliveries', perms: ['sales.delivery.view'] },
+      { key: '/sales/invoices',   icon: <Receipt size={16} />, label: 'Invoices', perms: ['sales.invoice.view'] },
+      { key: '/sales/receipts',   icon: <Banknote size={16} />, label: 'Receipts', perms: ['sales.receipt.view'] },
     ],
   },
   {
@@ -98,12 +106,12 @@ const NAV_ITEMS: NavItem[] = [
     label: 'Inventory',
     perms: ['inventory.stock.view', 'inventory.stock.adjust', 'inventory.stock.transfer'],
     children: [
-      { key: '/inventory/stock',        label: 'Stock Balance', perms: ['inventory.stock.view'] },
-      { key: '/inventory/ledger',       label: 'Stock Ledger', perms: ['inventory.stock.view'] },
-      { key: '/inventory/adjustments',  label: 'Adjustments', perms: ['inventory.stock.adjust'] },
-      { key: '/inventory/transfers',    label: 'Transfers', perms: ['inventory.stock.transfer'] },
-      { key: '/inventory/batches',      label: 'Batch Tracking', perms: ['inventory.stock.view'] },
-      { key: '/inventory/serials',      label: 'Serial Tracking', perms: ['inventory.stock.view'] },
+      { key: '/inventory/stock',        icon: <Scale size={16} />, label: 'Stock Balance', perms: ['inventory.stock.view'] },
+      { key: '/inventory/ledger',       icon: <BookOpen size={16} />, label: 'Stock Ledger', perms: ['inventory.stock.view'] },
+      { key: '/inventory/adjustments',  icon: <Edit3 size={16} />, label: 'Adjustments', perms: ['inventory.stock.adjust'] },
+      { key: '/inventory/transfers',    icon: <ArrowRightLeft size={16} />, label: 'Transfers', perms: ['inventory.stock.transfer'] },
+      { key: '/inventory/batches',      icon: <Layers size={16} />, label: 'Batch Tracking', perms: ['inventory.stock.view'] },
+      { key: '/inventory/serials',      icon: <Barcode size={16} />, label: 'Serial Tracking', perms: ['inventory.stock.view'] },
     ],
   },
   {
@@ -112,10 +120,10 @@ const NAV_ITEMS: NavItem[] = [
     label: 'Manufacturing',
     perms: ['manufacturing.bom.view', 'manufacturing.order.view'],
     children: [
-      { key: '/manufacturing/bom',          label: 'Bill of Materials', perms: ['manufacturing.bom.view'] },
-      { key: '/manufacturing/orders',       label: 'Production Orders', perms: ['manufacturing.order.view'] },
-      { key: '/manufacturing/batches',      label: 'Process Batches', perms: ['manufacturing.order.view'] },
-      { key: '/manufacturing/work-centres', label: 'Work Centres', perms: ['manufacturing.order.view'] },
+      { key: '/manufacturing/bom',          icon: <ListTree size={16} />, label: 'Bill of Materials', perms: ['manufacturing.bom.view'] },
+      { key: '/manufacturing/orders',       icon: <Factory size={16} />, label: 'Production Orders', perms: ['manufacturing.order.view'] },
+      { key: '/manufacturing/batches',      icon: <Layers size={16} />, label: 'Process Batches', perms: ['manufacturing.order.view'] },
+      { key: '/manufacturing/work-centres', icon: <Cog size={16} />, label: 'Work Centres', perms: ['manufacturing.order.view'] },
     ],
   },
   {
@@ -124,14 +132,14 @@ const NAV_ITEMS: NavItem[] = [
     label: 'Accounting',
     perms: ['accounting.jv.view', 'accounting.coa.view', 'accounting.reports.view', 'accounting.reports.financial'],
     children: [
-      { key: '/accounting/jv',             label: 'Journal Vouchers', perms: ['accounting.jv.view'] },
-      { key: '/accounting/trial-balance',  label: 'Trial Balance', perms: ['accounting.reports.financial'] },
-      { key: '/accounting/profit-loss',    label: 'P&L', perms: ['accounting.reports.financial'] },
-      { key: '/accounting/balance-sheet',  label: 'Balance Sheet', perms: ['accounting.reports.financial'] },
-      { key: '/accounting/ledger',         label: 'GL Ledger', perms: ['accounting.reports.view'] },
-      { key: '/accounting/ap-aging',       label: 'AP Aging', perms: ['accounting.reports.view'] },
-      { key: '/accounting/ar-aging',       label: 'AR Aging', perms: ['accounting.reports.view'] },
-      { key: '/accounting/gst-reports',    label: 'GST Reports', perms: ['accounting.reports.view'] },
+      { key: '/accounting/jv',             icon: <BookOpen size={16} />, label: 'Journal Vouchers', perms: ['accounting.jv.view'] },
+      { key: '/accounting/trial-balance',  icon: <Scale size={16} />, label: 'Trial Balance', perms: ['accounting.reports.financial'] },
+      { key: '/accounting/profit-loss',    icon: <TrendingUp size={16} />, label: 'P&L', perms: ['accounting.reports.financial'] },
+      { key: '/accounting/balance-sheet',  icon: <Landmark size={16} />, label: 'Balance Sheet', perms: ['accounting.reports.financial'] },
+      { key: '/accounting/ledger',         icon: <BookOpen size={16} />, label: 'GL Ledger', perms: ['accounting.reports.view'] },
+      { key: '/accounting/ap-aging',       icon: <Clock size={16} />, label: 'AP Aging', perms: ['accounting.reports.view'] },
+      { key: '/accounting/ar-aging',       icon: <Clock size={16} />, label: 'AR Aging', perms: ['accounting.reports.view'] },
+      { key: '/accounting/gst-reports',    icon: <Percent size={16} />, label: 'GST Reports', perms: ['accounting.reports.view'] },
     ],
   },
   {
@@ -140,11 +148,11 @@ const NAV_ITEMS: NavItem[] = [
     label: 'Reports',
     perms: ['purchase.reports.view', 'sales.reports.view', 'inventory.reports.view', 'manufacturing.reports.view', 'accounting.reports.view'],
     children: [
-      { key: '/reports/purchase',       label: 'Purchase', perms: ['purchase.reports.view'] },
-      { key: '/reports/sales',          label: 'Sales', perms: ['sales.reports.view'] },
-      { key: '/reports/inventory',      label: 'Inventory', perms: ['inventory.reports.view'] },
-      { key: '/reports/manufacturing',  label: 'Manufacturing', perms: ['manufacturing.reports.view'] },
-      { key: '/reports/finance',        label: 'Finance', perms: ['accounting.reports.view'] },
+      { key: '/reports/purchase',       icon: <BarChart2 size={16} />, label: 'Purchase', perms: ['purchase.reports.view'] },
+      { key: '/reports/sales',          icon: <LineChart size={16} />, label: 'Sales', perms: ['sales.reports.view'] },
+      { key: '/reports/inventory',      icon: <PieChart size={16} />, label: 'Inventory', perms: ['inventory.reports.view'] },
+      { key: '/reports/manufacturing',  icon: <Activity size={16} />, label: 'Manufacturing', perms: ['manufacturing.reports.view'] },
+      { key: '/reports/finance',        icon: <DollarSign size={16} />, label: 'Finance', perms: ['accounting.reports.view'] },
     ],
   },
   {
@@ -153,14 +161,17 @@ const NAV_ITEMS: NavItem[] = [
     label: 'Settings',
     perms: ['settings.company.view', 'settings.plants.view', 'auth.users.view', 'auth.roles.view', 'accounting.coa.view'],
     children: [
-      { key: '/settings/company',        label: 'Company', perms: ['settings.company.view'] },
-      { key: '/settings/plants',         label: 'Plants & Warehouses', perms: ['settings.plants.view'] },
-      { key: '/settings/users',          label: 'Users & Roles', perms: ['auth.users.view', 'auth.roles.view'] },
-      { key: '/settings/number-series',  label: 'Number Series', perms: ['settings.company.view'] },
-      { key: '/settings/coa',            label: 'Chart of Accounts', perms: ['accounting.coa.view'] },
-      { key: '/settings/tax-codes',      label: 'Tax Codes', perms: ['settings.company.view'] },
-      { key: '/settings/print-templates', label: 'Print Templates', perms: ['settings.company.view'] },
-      { key: '/settings/integrations',   label: 'Integrations', perms: ['settings.company.view'] },
+      { key: '/settings/company',        icon: <Building size={16} />, label: 'Company', perms: ['settings.company.view'] },
+      { key: '/settings/plants',         icon: <Warehouse size={16} />, label: 'Plants & Warehouses', perms: ['settings.plants.view'] },
+      { key: '/settings/users',          icon: <Users size={16} />, label: 'Users', perms: ['auth.users.view'] },
+      { key: '/settings/roles',          icon: <Shield size={16} />, label: 'Roles & Permissions', perms: ['auth.roles.view'] },
+      { key: '/settings/approval-limits', icon: <ShieldCheck size={16} />, label: 'Approval Limits', perms: ['settings.approvalworkflow.manage'] },
+      { key: '/settings/number-series',  icon: <Hash size={16} />, label: 'Number Series', perms: ['settings.company.view'] },
+      { key: '/settings/coa',            icon: <Network size={16} />, label: 'Chart of Accounts', perms: ['accounting.coa.view'] },
+      { key: '/settings/tax-codes',      icon: <Percent size={16} />, label: 'Tax Codes', perms: ['settings.company.view'] },
+      { key: '/settings/custom-fields',  icon: <Sliders size={16} />, label: 'Custom Fields', perms: ['settings.company.view'] },
+      { key: '/settings/print-templates', icon: <Printer size={16} />, label: 'Print Templates', perms: ['settings.company.view'] },
+      { key: '/settings/integrations',   icon: <Plug size={16} />, label: 'Integrations', perms: ['settings.company.view'] },
     ],
   },
 ];
@@ -192,6 +203,7 @@ export function AppShell() {
   const { isDark, toggle: toggleTheme } = useThemeStore();
   const { company, plant } = usePlantStore();
   const { permissions, fetchPermissions, hasAnyPermission } = usePermissionStore();
+  const closeAllTabs = useWorkspaceStore((s) => s.closeAll);
 
   // Sync server session context and access token whenever company or plant changes
   useEffect(() => {
@@ -254,11 +266,17 @@ export function AppShell() {
 
   // Derive selected + open menu keys from current path
   const selectedKeys = [location.pathname];
-  const openKeys = useMemo(() => {
+  const derivedOpenKeys = useMemo(() => {
     return NAV_GROUP_KEYS.filter((g) =>
       location.pathname.startsWith('/' + g)
     );
   }, [location.pathname]);
+
+  const [activeOpenKeys, setActiveOpenKeys] = useState<string[]>(derivedOpenKeys);
+
+  useEffect(() => {
+    setActiveOpenKeys(derivedOpenKeys);
+  }, [derivedOpenKeys]);
 
   const handleMenuClick = ({ key }: { key: string }) => {
     navigate(key);
@@ -299,57 +317,70 @@ export function AppShell() {
     },
   ];
 
+  // ─── Notifications Mock Data ────────────────────────────────────────────────
+  const notifications = [
+    { id: '1', title: 'Approval Required', description: 'Purchase Order PO-1045 needs your approval.', time: '10m ago', unread: true },
+    { id: '2', title: 'Low Stock Alert', description: 'Item Paracetamol 500mg is below reorder level.', time: '1h ago', unread: true },
+    { id: '3', title: 'System Update', description: 'KAIRO ERP has been updated to v2.4.', time: '2d ago', unread: false },
+  ];
+
+  const notificationContent = (
+    <div style={{ width: 320, margin: '-12px -16px' }}>
+      <div style={{ padding: '12px 16px', borderBottom: `1px solid ${dt.colorBorderSecondary}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Text strong>Notifications</Text>
+        <Button type="link" size="small" style={{ fontSize: 12, padding: 0 }}>Mark all as read</Button>
+      </div>
+      <List
+        dataSource={notifications}
+        renderItem={(item) => (
+          <List.Item
+            style={{
+              padding: '12px 16px',
+              cursor: 'pointer',
+              background: item.unread ? (isDark ? '#1e293b' : '#f0fdf4') : 'transparent',
+              borderBottom: `1px solid ${dt.colorBorderSecondary}`,
+              transition: 'background 0.2s',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = dt.colorBgLayout)}
+            onMouseLeave={(e) => (e.currentTarget.style.background = item.unread ? (isDark ? '#1e293b' : '#f0fdf4') : 'transparent')}
+          >
+            <List.Item.Meta
+              title={<span style={{ fontSize: 13, fontWeight: item.unread ? 600 : 500 }}>{item.title}</span>}
+              description={
+                <div>
+                  <div style={{ fontSize: 12, color: dt.colorTextSecondary }}>{item.description}</div>
+                  <div style={{ fontSize: 11, color: dt.colorTextTertiary, marginTop: 4 }}>{item.time}</div>
+                </div>
+              }
+            />
+            {item.unread && <div style={{ width: 8, height: 8, borderRadius: 4, background: '#10b981' }} />}
+          </List.Item>
+        )}
+      />
+      <div style={{ padding: '10px 16px', textAlign: 'center', borderTop: `1px solid ${dt.colorBorderSecondary}` }}>
+        <Button type="link" size="small" style={{ fontSize: 12 }}>View all notifications</Button>
+      </div>
+    </div>
+  );
+
   // ─── Sidebar content ────────────────────────────────────────────────────────
   const siderContent = (
     <>
-      {/* Logo / brand */}
-      <div
-        style={{
-          height: 56,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: collapsed && isDesktop ? 'center' : 'flex-start',
-          padding: collapsed && isDesktop ? 0 : '0 20px',
-          borderBottom: `1px solid ${dt.colorBorderSecondary}`,
-          overflow: 'hidden',
-          flexShrink: 0,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {/* Logo icon — hexagon */}
-          <div
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: 8,
-              background: 'linear-gradient(135deg, #4F46E5, #818CF8)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#fff',
-              fontWeight: 800,
-              fontSize: 16,
-              boxShadow: '0 2px 8px rgba(79, 70, 229, 0.4)',
-              flexShrink: 0,
-            }}
-          >
-            K
-          </div>
-          {(!collapsed || !isDesktop) && (
-            <Text strong style={{ fontSize: 15, whiteSpace: 'nowrap' }}>
-              KAIRO ERP
-            </Text>
-          )}
-        </div>
-      </div>
+      <SwipeToCloseLogo 
+        collapsed={collapsed} 
+        isDesktop={isDesktop} 
+        onDoubleClick={() => setActiveOpenKeys([])} 
+      />
 
       {/* Navigation */}
       <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
         <Menu
           mode="inline"
           selectedKeys={selectedKeys}
-          defaultOpenKeys={openKeys}
+          openKeys={activeOpenKeys}
+          onOpenChange={setActiveOpenKeys}
           inlineCollapsed={collapsed && isDesktop}
+          inlineIndent={16}
           items={filteredNavItems as any}
           onClick={handleMenuClick}
           style={{ border: 0, marginTop: 4, background: 'transparent' }}
@@ -403,7 +434,9 @@ export function AppShell() {
             background: isDark ? '#1F2433' : '#fff',
           }}
         >
-          {siderContent}
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+            {siderContent}
+          </div>
         </Sider>
       )}
 
@@ -484,13 +517,29 @@ export function AppShell() {
           </div>
 
           {/* Right header controls */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            {/* Notification Inbox */}
+            <Popover
+              content={notificationContent}
+              trigger="click"
+              placement="bottomRight"
+              arrow={false}
+            >
+              <Badge count={2} size="small" offset={[-4, 4]}>
+                <Button
+                  type="text"
+                  shape="circle"
+                  icon={<BellOutlined style={{ fontSize: 18, color: dt.colorTextSecondary }} />}
+                />
+              </Badge>
+            </Popover>
+
             {/* Theme toggle */}
             <Tooltip title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}>
               <Button
                 type="text"
                 shape="circle"
-                icon={isDark ? <SunOutlined /> : <MoonOutlined />}
+                icon={isDark ? <SunOutlined style={{ fontSize: 18 }} /> : <MoonOutlined style={{ fontSize: 18 }} />}
                 onClick={toggleTheme}
               />
             </Tooltip>
@@ -523,6 +572,9 @@ export function AppShell() {
           </div>
         </Header>
 
+        {/* Workspace Tab Bar */}
+        <WorkspaceTabs />
+
         {/* Page content */}
         <Content
           style={{
@@ -536,6 +588,7 @@ export function AppShell() {
       </Layout>
 
       <ChangePasswordModal open={changePasswordModal} onClose={() => setChangePasswordModal(false)} />
+      <CommandPalette />
     </Layout>
   );
 }

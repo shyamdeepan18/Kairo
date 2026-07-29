@@ -51,13 +51,16 @@ export function SelectCompanyPage() {
   }, []);
 
   const handleSelectCompany = async (company: ErpCompany) => {
-    if (!company.hasLicense) {
-      setError(`Company '${company.name}' does not have an active license. Please contact your system administrator.`);
-      return;
-    }
-    if (company.licenseValidTo && new Date(company.licenseValidTo) < new Date()) {
-      setError(`The license for '${company.name}' expired on ${new Date(company.licenseValidTo).toLocaleDateString()}. Please renew the license.`);
-      return;
+    const isSystemAdmin = user?.isSystemAdmin;
+    if (!isSystemAdmin) {
+      if (!company.hasLicense) {
+        setError(`Company '${company.name}' does not have an active license. Please contact your system administrator.`);
+        return;
+      }
+      if (company.licenseValidTo && new Date(company.licenseValidTo) < new Date()) {
+        setError(`The license for '${company.name}' expired on ${new Date(company.licenseValidTo).toLocaleDateString()}. Please renew the license.`);
+        return;
+      }
     }
 
     setSelectedCompany(company);
@@ -117,107 +120,64 @@ export function SelectCompanyPage() {
     navigate('/login', { replace: true });
   };
 
-  const cardHoverStyle = {
-    cursor: 'pointer',
-    border: `1px solid ${dt.colorBorderSecondary}`,
-    borderRadius: 12,
-    transition: 'all 0.15s ease',
-  };
-
   return (
-    <div
-      style={{
-        minHeight: '100vh',
-        background: isDark
-          ? '#191C24'
-          : 'linear-gradient(135deg, #EEF2FF 0%, #F4F6FB 100%)',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'flex-start',
-        padding: '48px 24px',
-      }}
-    >
+    <div className={`min-h-screen flex flex-col items-center justify-start pt-12 px-6 pb-6 transition-colors duration-300 ${isDark ? 'bg-[#191C24]' : 'bg-gradient-to-br from-indigo-50 via-sky-50 to-slate-50'}`}>
       {/* Header */}
-      <div
-        style={{
-          width: '100%',
-          maxWidth: 680,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 40,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: 10,
-              background: 'linear-gradient(135deg, #4F46E5, #818CF8)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#fff',
-              fontWeight: 700,
-              fontSize: 16,
-            }}
-          >
+      <div className="w-full max-w-[680px] flex items-center justify-between mb-10">
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-600 to-indigo-400 flex items-center justify-center text-white font-bold text-base shadow-sm">
             E
           </div>
-          <Text strong style={{ fontSize: 16 }}>
+          <span className="font-bold text-base text-slate-900 dark:text-white">
             KAIRO ERP
-          </Text>
+          </span>
         </div>
-        <Button
-          type="text"
-          icon={<LogoutOutlined />}
-          onClick={handleLogout}
-          style={{ color: dt.colorTextSecondary }}
-        >
-          Sign out
-        </Button>
+        <div className="flex items-center gap-3">
+          {user?.isSystemAdmin && (
+            <Button
+              type="primary"
+              onClick={() => navigate('/admin', { replace: true })}
+            >
+              Go to Admin Portal
+            </Button>
+          )}
+          <Button
+            type="text"
+            icon={<LogoutOutlined />}
+            onClick={handleLogout}
+            className="text-slate-500 dark:text-slate-400"
+          >
+            Sign out
+          </Button>
+        </div>
       </div>
 
       {/* Content card */}
-      <div
-        style={{
-          width: '100%',
-          maxWidth: 680,
-          background: dt.colorBgContainer,
-          borderRadius: 16,
-          border: `1px solid ${dt.colorBorderSecondary}`,
-          boxShadow: isDark
-            ? '0 8px 32px rgba(0,0,0,0.4)'
-            : '0 8px 32px rgba(15,23,42,0.08)',
-          overflow: 'hidden',
-        }}
-      >
+      <div className="w-full max-w-[680px] bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-[0_8px_32px_rgba(15,23,42,0.08)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.4)] overflow-hidden">
         {/* Top accent */}
-        <div style={{ height: 4, background: 'linear-gradient(90deg, #4F46E5, #818CF8)' }} />
+        <div className="h-1 bg-gradient-to-r from-indigo-600 to-indigo-400" />
 
-        <div style={{ padding: '32px 32px 36px' }}>
+        <div className="p-8 pb-9">
           {/* Step header */}
-          <div style={{ marginBottom: 24 }}>
+          <div className="mb-6">
             {step === 'plant' && (
               <Button
                 type="text"
                 icon={<ArrowLeftOutlined />}
                 onClick={handleBack}
-                style={{ color: dt.colorTextSecondary, padding: '0 0 12px 0', display: 'block' }}
+                className="text-slate-500 dark:text-slate-400 pb-3 block"
               >
                 Back
               </Button>
             )}
-            <Title level={4} style={{ margin: 0, fontWeight: 700 }}>
+            <h2 className="m-0 font-bold text-lg text-slate-900 dark:text-white">
               {step === 'company' ? 'Select Company' : `Select Plant — ${selectedCompany?.name}`}
-            </Title>
-            <Text type="secondary" style={{ fontSize: 13 }}>
+            </h2>
+            <p className="text-[13px] text-slate-500 dark:text-slate-400 mt-1 mb-0">
               {step === 'company'
                 ? 'Choose the company you want to work in'
                 : 'Choose which plant / location to open'}
-            </Text>
+            </p>
           </div>
 
           {/* Error */}
@@ -228,84 +188,68 @@ export function SelectCompanyPage() {
               showIcon
               closable
               onClose={() => setError(null)}
-              style={{ marginBottom: 20, borderRadius: 8 }}
+              className="mb-5 rounded-lg"
             />
           )}
 
           {/* Loading */}
           {loading ? (
-            <div style={{ textAlign: 'center', padding: '40px 0' }}>
+            <div className="text-center py-10">
               <Spin size="large" />
             </div>
           ) : step === 'company' ? (
             /* Company list */
             companies.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '40px 0', color: dt.colorTextSecondary }}>
-                <BankOutlined style={{ fontSize: 40, marginBottom: 12, opacity: 0.4 }} />
+              <div className="text-center py-10 text-slate-500 dark:text-slate-400">
+                <BankOutlined className="text-[40px] mb-3 opacity-40" />
                 <div>No companies found. Ask your administrator to assign you a role.</div>
               </div>
             ) : (
               <Row gutter={[12, 12]}>
-                {companies.map((co) => (
-                  <Col xs={24} sm={12} key={co.id}>
-                    <Card
-                      hoverable={co.hasLicense && (!co.licenseValidTo || new Date(co.licenseValidTo) >= new Date())}
-                      style={{
-                        ...cardHoverStyle,
-                        opacity: co.hasLicense && (!co.licenseValidTo || new Date(co.licenseValidTo) >= new Date()) ? 1 : 0.6,
-                      }}
-                      styles={{ body: { padding: '16px 20px' } }}
-                      onClick={() => handleSelectCompany(co)}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                        <div
-                          style={{
-                            width: 40,
-                            height: 40,
-                            borderRadius: 10,
-                            background: isDark ? 'rgba(129,140,248,0.12)' : '#EEF2FF',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            flexShrink: 0,
-                          }}
-                        >
-                          <BankOutlined
-                            style={{
-                              fontSize: 18,
-                              color: isDark ? '#818CF8' : '#4F46E5',
-                            }}
-                          />
-                        </div>
-                        <div style={{ minWidth: 0 }}>
-                          <Text strong style={{ display: 'block', fontSize: 14 }}>
-                            {co.name}
-                          </Text>
-                          {co.gstin && (
-                            <Text type="secondary" style={{ fontSize: 12 }}>
-                              GSTIN: {co.gstin}
-                            </Text>
-                          )}
-                          <div style={{ marginTop: 4 }}>
-                            <Badge
-                              color={isDark ? '#4ADE80' : '#15803D'}
-                              text={
-                                <Text style={{ fontSize: 11, color: dt.colorTextTertiary }}>
-                                  {co.baseCurrency}
-                                </Text>
-                              }
-                            />
-                            {!co.hasLicense ? (
-                              <Tag color="error" style={{ marginLeft: 8, fontSize: 10, borderRadius: 10, border: 0 }}>No License</Tag>
-                            ) : co.licenseValidTo && new Date(co.licenseValidTo) < new Date() ? (
-                              <Tag color="warning" style={{ marginLeft: 8, fontSize: 10, borderRadius: 10, border: 0 }}>Expired</Tag>
-                            ) : null}
+                {companies.map((co) => {
+                  const hasValidLicense = co.hasLicense && (!co.licenseValidTo || new Date(co.licenseValidTo) >= new Date());
+                  return (
+                    <Col xs={24} sm={12} key={co.id}>
+                      <Card
+                        hoverable={hasValidLicense}
+                        className={`cursor-pointer border border-slate-200 dark:border-slate-700 rounded-xl transition-all duration-150 ${hasValidLicense ? 'opacity-100 hover:border-indigo-400 dark:hover:border-indigo-500 hover:shadow-sm' : 'opacity-60 cursor-not-allowed bg-slate-50 dark:bg-slate-900'}`}
+                        styles={{ body: { padding: '16px 20px' } }}
+                        onClick={() => handleSelectCompany(co)}
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center shrink-0">
+                            <BankOutlined className="text-[18px] text-indigo-600 dark:text-indigo-400" />
+                          </div>
+                          <div className="min-w-0">
+                            <span className="block font-bold text-[14px] text-slate-900 dark:text-white">
+                              {co.name}
+                            </span>
+                            {co.gstin && (
+                              <span className="text-[12px] text-slate-500 dark:text-slate-400 block mt-0.5">
+                                GSTIN: {co.gstin}
+                              </span>
+                            )}
+                            <div className="mt-1 flex items-center">
+                              <Badge
+                                color={isDark ? '#4ADE80' : '#15803D'}
+                                text={
+                                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                                    {co.baseCurrency}
+                                  </span>
+                                }
+                              />
+                              {!co.hasLicense ? (
+                                <Tag color="error" className="ml-2 text-[10px] rounded-full border-0">No License</Tag>
+                              ) : co.licenseValidTo && new Date(co.licenseValidTo) < new Date() ? (
+                                <Tag color="warning" className="ml-2 text-[10px] rounded-full border-0">Expired</Tag>
+                              ) : null}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </Card>
-                  </Col>
-                ))}
+                      </Card>
+                    </Col>
+                  );
+                })}
               </Row>
             )
           ) : (
@@ -315,44 +259,25 @@ export function SelectCompanyPage() {
                 <Col xs={24} sm={12} key={plant.id}>
                   <Card
                     hoverable
-                    style={cardHoverStyle}
+                    className="cursor-pointer border border-slate-200 dark:border-slate-700 rounded-xl transition-all duration-150 hover:border-indigo-400 dark:hover:border-indigo-500 hover:shadow-sm"
                     styles={{ body: { padding: '16px 20px' } }}
                     onClick={() => handleSelectPlant(plant)}
                   >
-                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                      <div
-                        style={{
-                          width: 40,
-                          height: 40,
-                          borderRadius: 10,
-                          background: isDark ? 'rgba(96,165,250,0.12)' : '#EFF6FF',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          flexShrink: 0,
-                        }}
-                      >
-                        <EnvironmentOutlined
-                          style={{
-                            fontSize: 18,
-                            color: isDark ? '#60A5FA' : '#1D4ED8',
-                          }}
-                        />
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center shrink-0">
+                        <EnvironmentOutlined className="text-[18px] text-blue-600 dark:text-blue-400" />
                       </div>
-                      <div style={{ minWidth: 0 }}>
-                        <Text strong style={{ display: 'block', fontSize: 14 }}>
+                      <div className="min-w-0">
+                        <span className="block font-bold text-[14px] text-slate-900 dark:text-white">
                           {plant.name}
-                        </Text>
-                        <Text type="secondary" style={{ fontSize: 12 }}>
+                        </span>
+                        <span className="text-[12px] text-slate-500 dark:text-slate-400 block mt-0.5">
                           Code: {plant.code}
-                        </Text>
+                        </span>
                         {plant.gstin && (
-                          <Text
-                            type="secondary"
-                            style={{ display: 'block', fontSize: 11 }}
-                          >
+                          <span className="block text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
                             GSTIN: {plant.gstin}
-                          </Text>
+                          </span>
                         )}
                       </div>
                     </div>

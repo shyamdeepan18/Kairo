@@ -1,23 +1,20 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import dayjs from 'dayjs';
 import {
-  Table, Button, Drawer, Form, Input, Select, DatePicker, InputNumber,
-  Typography, Space, Popconfirm, message, Descriptions, theme as antTheme,
+  Drawer, Form, Input, Select, DatePicker, InputNumber, Popconfirm, message, Descriptions
 } from 'antd';
 import {
-  PlusOutlined, DeleteOutlined, EyeOutlined, SearchOutlined,
-  SendOutlined, CheckOutlined, StopOutlined,
-} from '@ant-design/icons';
+  ShoppingCart, Search, Plus, Eye, Send, CheckCircle2, XCircle, StopCircle, 
+  Trash2, FileText, Calendar, Building2, Receipt, ArrowRight, ClipboardList
+} from 'lucide-react';
 import { usePlantStore } from '../../store/plant';
 import { purchaseApi, computeLine, apiErr, type PurchaseHeader, type Supplier } from '../../api/purchase';
 import { mastersApi, type Item } from '../../api/masters';
 import { settingsApi, type TaxCode } from '../../api/settings';
 import { StatusBadge, type DocumentStatus } from '../../components/shared/StatusBadge';
 import { AmountDisplay } from '../../components/shared/AmountDisplay';
-
-const { Title, Text } = Typography;
 
 interface DraftLine {
   key: number;
@@ -37,7 +34,6 @@ const newLine = (): DraftLine => ({ key: lineSeq++, quantity: 1, rateRupees: 0, 
 export function PurchaseOrdersPage() {
   const { confirmClose } = useUnsavedChanges();
   const { company, plant } = usePlantStore();
-  const { token: dt } = antTheme.useToken();
   const [form] = Form.useForm();
   const location = useLocation();
   const navigate = useNavigate();
@@ -97,7 +93,6 @@ export function PurchaseOrdersPage() {
     }
   }, [location.state, navigate, form]);
 
-  // ── Line editing ──────────────────────────────────────────────────────────
   const setLine = (key: number, patch: Partial<DraftLine>) =>
     setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
 
@@ -115,7 +110,6 @@ export function PurchaseOrdersPage() {
     },
     { net: 0, tax: 0, total: 0 }
   );
-
 
   const openCreate = () => {
     form.resetFields();
@@ -214,149 +208,335 @@ export function PurchaseOrdersPage() {
     catch (e) { message.error(apiErr(e)); }
   };
 
-  const cardStyle = { background: dt.colorBgContainer, borderRadius: 12, border: `1px solid ${dt.colorBorderSecondary}`, overflow: 'hidden' as const };
-
-  const columns = [
-    { title: 'PO Number', dataIndex: 'documentNumber', key: 'no', render: (v: string) => <Text strong style={{ fontFamily: 'monospace', fontSize: 13 }}>{v}</Text> },
-    { title: 'Supplier', key: 'supplier', render: (_: unknown, r: PurchaseHeader) => <Text style={{ fontSize: 13 }}>{supplierName(r.supplierId)}</Text> },
-    { title: 'Date', dataIndex: 'postingDate', key: 'date', render: (v: string) => <Text type="secondary" style={{ fontSize: 12 }}>{v}</Text> },
-    { title: 'Status', dataIndex: 'status', key: 'status', render: (v: string) => <StatusBadge status={v as DocumentStatus} size="small" /> },
-    { title: 'Total', dataIndex: 'totalAmountPaise', key: 'total', align: 'right' as const, render: (v: number) => <AmountDisplay paise={v} /> },
-    {
-      title: '', key: 'actions', align: 'right' as const, width: 220,
-      render: (_: unknown, r: PurchaseHeader) => (
-        <Space size="middle">
-          <Button type="text" size="small" icon={<EyeOutlined />} onClick={() => openView(r)} />
-          {r.status === 'draft' && <Button type="text" size="small" icon={<SendOutlined />} onClick={() => runAction(r, 'submit')}>Submit</Button>}
-          {r.status === 'draft' && <Button type="text" size="small" onClick={() => openEdit(r)}>Edit</Button>}
-          {r.status === 'submitted' && (() => {
-            const hasWorkflow = !!(r as any).approvalInfo;
-            const isEligible = hasWorkflow ? (r as any).approvalInfo.isEligibleApprover : true;
-            const hasApproved = hasWorkflow ? (r as any).approvalInfo.hasApproved : false;
-
-            if (hasWorkflow) {
-              if (hasApproved) {
-                return <Text type="success" style={{ fontStyle: 'italic', fontSize: 12 }}>Approved. Waiting...</Text>;
-              }
-              if (!isEligible) {
-                return <Text type="secondary" style={{ fontStyle: 'italic', fontSize: 12 }}>Pending: {(r as any).approvalInfo.currentApproverName}</Text>;
-              }
-            }
-
-            return (
-              <Popconfirm title="Approve this PO?" onConfirm={() => runAction(r, 'approve')}>
-                <Button type="text" size="small" icon={<CheckOutlined />}>Approve</Button>
-              </Popconfirm>
-            );
-          })()}
-          {r.status === 'approved' && (
-            <Popconfirm title="Cancel this PO?" onConfirm={() => runAction(r, 'cancel')}>
-              <Button type="text" size="small" danger icon={<StopOutlined />}>Cancel</Button>
-            </Popconfirm>
-          )}
-        </Space>
-      ),
-    },
-  ];
-
   const itemOptions = items.map((i) => ({ value: i.id, label: `${i.itemCode} — ${i.itemName}` }));
   const taxOptions = taxCodes.map((t) => ({ value: t.id, label: `${t.code} (${t.gstRateBp / 100}%)` }));
 
-  const lineColumns = [
-    {
-      title: 'Item', key: 'item', width: 220,
-      render: (_: unknown, l: DraftLine) => (
-        <Select showSearch optionFilterProp="label" placeholder="Select item" style={{ width: '100%' }}
-          value={l.itemId} options={itemOptions} onChange={(v) => onPickItem(l.key, v)} />
-      ),
-    },
-    { title: 'Qty', key: 'qty', width: 90, render: (_: unknown, l: DraftLine) => (<InputNumber min={0} value={l.quantity} onChange={(v) => setLine(l.key, { quantity: Number(v) || 0 })} style={{ width: '100%' }} />) },
-    { title: 'UOM', key: 'uom', width: 80, render: (_: unknown, l: DraftLine) => (<Input value={l.uom} onChange={(e) => setLine(l.key, { uom: e.target.value })} />) },
-    { title: 'Rate ₹', key: 'rate', width: 110, render: (_: unknown, l: DraftLine) => (<InputNumber min={0} step={0.01} value={l.rateRupees} onChange={(v) => setLine(l.key, { rateRupees: Number(v) || 0 })} style={{ width: '100%' }} />) },
-    { title: 'Disc %', key: 'disc', width: 80, render: (_: unknown, l: DraftLine) => (<InputNumber min={0} max={100} value={l.discountPercent} onChange={(v) => setLine(l.key, { discountPercent: Number(v) || 0 })} style={{ width: '100%' }} />) },
-    { title: 'Tax', key: 'tax', width: 130, render: (_: unknown, l: DraftLine) => (<Select allowClear placeholder="Tax" style={{ width: '100%' }} value={l.taxCodeId} options={taxOptions} onChange={(v) => setLine(l.key, { taxCodeId: v })} />) },
-    { title: 'Amount', key: 'amt', align: 'right' as const, width: 110, render: (_: unknown, l: DraftLine) => <AmountDisplay paise={lineComputed(l).totalAmountPaise} /> },
-    { title: '', key: 'rm', width: 36, render: (_: unknown, l: DraftLine) => (<Button type="text" size="small" danger icon={<DeleteOutlined />} onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))} />) },
-  ];
-
   return (
-    <div>
-      <div style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
-          <Title level={4} style={{ margin: 0, fontWeight: 700 }}>Purchase Orders</Title>
-          <Text type="secondary" style={{ fontSize: 13 }}>{rows.length} order{rows.length !== 1 ? 's' : ''}</Text>
+    <div className="h-full flex flex-col bg-slate-50 dark:bg-slate-900 transition-colors">
+      {/* Header */}
+      <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 py-6 flex flex-col lg:flex-row justify-between items-start lg:items-center shrink-0 transition-colors relative z-10 gap-4">
+        <div className="flex items-center space-x-3">
+          <div className="p-2 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-lg">
+            <ShoppingCart className="w-6 h-6" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold text-slate-900 dark:text-white dark:text-white transition-colors">Purchase Orders</h1>
+            <p className="text-sm text-slate-500 dark:text-slate-400 dark:text-slate-400 transition-colors">Track and manage vendor orders & approvals</p>
+          </div>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>New PO</Button>
+        <button 
+          onClick={openCreate}
+          className="flex items-center px-4 py-2 bg-emerald-600 dark:bg-emerald-600/90 text-white font-bold rounded-lg shadow-sm hover:bg-emerald-700 dark:hover:bg-emerald-500 transition-colors"
+        >
+          <Plus className="w-4 h-4 mr-2" /> New PO
+        </button>
       </div>
 
-      <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
-        <Select allowClear placeholder="All statuses" value={statusFilter} onChange={setStatusFilter} style={{ minWidth: 180 }}
-          options={['draft', 'submitted', 'approved', 'cancelled'].map((s) => ({ value: s, label: s[0].toUpperCase() + s.slice(1) }))} />
+      <div className="flex-1 p-6 overflow-auto">
+        <div className="mb-4 flex items-center space-x-4">
+          <div className="relative">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 dark:text-slate-400" />
+            <input 
+              type="text" 
+              placeholder="Search PO number..." 
+              className="pl-9 pr-4 py-2 w-64 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-lg text-sm text-slate-900 dark:text-white dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
+            />
+          </div>
+          <Select 
+            allowClear 
+            placeholder="All Statuses" 
+            value={statusFilter} 
+            onChange={setStatusFilter} 
+            style={{ minWidth: 150 }} 
+            options={['draft', 'submitted', 'approved', 'cancelled'].map(s => ({ value: s, label: s.charAt(0).toUpperCase() + s.slice(1) }))} 
+          />
+        </div>
+
+        <div className="bg-white dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden transition-colors min-h-[400px]">
+          <table className="w-full text-sm text-left">
+            <thead className="text-xs text-slate-500 dark:text-slate-400 dark:text-slate-400 uppercase bg-slate-50/50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 transition-colors">
+              <tr>
+                <th className="px-6 py-4 font-bold">PO Number</th>
+                <th className="px-6 py-4 font-bold">Supplier</th>
+                <th className="px-6 py-4 font-bold">Date</th>
+                <th className="px-6 py-4 font-bold text-right">Total (₹)</th>
+                <th className="px-6 py-4 font-bold text-center">Status</th>
+                <th className="px-6 py-4 font-bold text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50 dark:divide-slate-800/50">
+              {rows.map(r => (
+                <tr key={r.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition-colors group">
+                  <td className="px-6 py-4">
+                    <div className="flex items-center space-x-2">
+                      <FileText className="w-4 h-4 text-slate-400 dark:text-slate-500 dark:text-slate-400" />
+                      <span className="font-mono font-bold text-indigo-700 dark:text-indigo-400 transition-colors">{r.documentNumber}</span>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="flex items-center space-x-2">
+                      <Building2 className="w-4 h-4 text-slate-400 dark:text-slate-500 dark:text-slate-400" />
+                      <span className="text-slate-800 dark:text-slate-200 dark:text-slate-200 font-medium transition-colors">{supplierName(r.supplierId)}</span>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="flex items-center space-x-2">
+                      <Calendar className="w-4 h-4 text-slate-400 dark:text-slate-500 dark:text-slate-400" />
+                      <span className="text-slate-500 dark:text-slate-400 dark:text-slate-400 font-medium transition-colors">{r.postingDate}</span>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 text-right font-mono text-slate-900 dark:text-white dark:text-white font-medium transition-colors">
+                    <AmountDisplay paise={r.totalAmountPaise} />
+                  </td>
+                  <td className="px-6 py-4 text-center">
+                    <StatusBadge status={r.status as DocumentStatus} size="small" />
+                  </td>
+                  <td className="px-6 py-4 text-right">
+                    <div className="flex items-center justify-end space-x-3">
+                      <button onClick={() => openView(r)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
+                        <Eye className="w-4 h-4" />
+                      </button>
+                      
+                      {r.status === 'draft' && (
+                        <>
+                          <button onClick={() => runAction(r, 'submit')} className="flex items-center text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 text-xs font-bold transition-colors">
+                            <Send className="w-3.5 h-3.5 mr-1" /> Submit
+                          </button>
+                          <button onClick={() => openEdit(r)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white dark:hover:text-slate-200 text-xs font-bold transition-colors">
+                            Edit
+                          </button>
+                        </>
+                      )}
+                      
+                      {r.status === 'submitted' && (() => {
+                        const hasWorkflow = !!(r as any).approvalInfo;
+                        const isEligible = hasWorkflow ? (r as any).approvalInfo.isEligibleApprover : true;
+                        const hasApproved = hasWorkflow ? (r as any).approvalInfo.hasApproved : false;
+
+                        if (hasWorkflow) {
+                          if (hasApproved) {
+                            return <span className="text-emerald-600 dark:text-emerald-500 text-xs italic font-bold">Approved. Waiting...</span>;
+                          }
+                          if (!isEligible) {
+                            return <span className="text-slate-500 dark:text-slate-400 dark:text-slate-400 text-xs italic">Pending: {(r as any).approvalInfo.currentApproverName}</span>;
+                          }
+                        }
+
+                        return (
+                          <Popconfirm title="Approve this PO?" onConfirm={() => runAction(r, 'approve')}>
+                            <button className="flex items-center text-emerald-600 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 text-xs font-bold transition-colors">
+                              <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Approve
+                            </button>
+                          </Popconfirm>
+                        );
+                      })()}
+
+                      {r.status === 'approved' && (
+                        <Popconfirm title="Cancel this PO?" onConfirm={() => runAction(r, 'cancel')}>
+                          <button className="flex items-center text-rose-600 dark:text-rose-400 hover:text-rose-800 dark:hover:text-rose-300 text-xs font-bold transition-colors">
+                            <StopCircle className="w-3.5 h-3.5 mr-1" /> Cancel
+                          </button>
+                        </Popconfirm>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {rows.length === 0 && !loading && (
+                <tr>
+                  <td colSpan={6} className="px-6 py-12 text-center text-slate-500 dark:text-slate-400 dark:text-slate-400 transition-colors">
+                    <ClipboardList className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                    No purchase orders found
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      <div style={cardStyle}>
-        <Table dataSource={rows} columns={columns} rowKey="id" loading={loading}
-          pagination={{ pageSize: 20, hideOnSinglePage: true }} locale={{ emptyText: 'No purchase orders yet.' }} />
-      </div>
-
-      {/* Create drawer */}
-      <Drawer title={form.getFieldValue('id') ? 'Edit Purchase Order' : 'New Purchase Order'} open={drawer} onClose={async () => { if (await confirmClose(form)) { form.resetFields(); setDrawer(false); } }} width={920}
-        extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>{form.getFieldValue('id') ? 'Save' : 'Create'}</Button>}>
-        <Form form={form} layout="vertical" onFinish={save} requiredMark={false}>
+      <Drawer 
+        title={<span className="font-bold text-slate-900 dark:text-white">{form.getFieldValue('id') ? 'Edit Purchase Order' : 'New Purchase Order'}</span>} 
+        open={drawer} 
+        onClose={async () => { if (await confirmClose(form)) { form.resetFields(); setDrawer(false); } }} 
+        width={1000}
+        extra={
+          <button onClick={() => form.submit()} disabled={saving} className="px-4 py-1.5 bg-indigo-600 text-white font-bold rounded-lg shadow-sm hover:bg-indigo-700 transition-colors">
+            {saving ? 'Saving...' : (form.getFieldValue('id') ? 'Save Changes' : 'Create PO')}
+          </button>
+        }
+      >
+        <Form form={form} layout="vertical" onFinish={save} requiredMark={false} className="space-y-4">
           <Form.Item name="id" hidden><Input /></Form.Item>
-          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-            <Form.Item name="supplierId" label="Supplier" rules={[{ required: true, message: 'Required' }]} style={{ minWidth: 280, flex: 1 }}>
-              <Select showSearch optionFilterProp="label" placeholder="Select supplier"
-                options={suppliers.map((s) => ({ value: s.id, label: `${s.supplierCode} — ${s.name}` }))} />
+          
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-700/50">
+            <Form.Item name="supplierId" label={<span className="font-bold text-slate-700 dark:text-slate-300">Supplier</span>} rules={[{ required: true }]} className="mb-0 col-span-1 md:col-span-1">
+              <Select showSearch optionFilterProp="label" placeholder="Select supplier" options={suppliers.map((s) => ({ value: s.id, label: `${s.supplierCode} — ${s.name}` }))} />
             </Form.Item>
-            <Form.Item name="postingDate" label="PO Date" rules={[{ required: true, message: 'Required' }]} style={{ width: 180 }}>
+            <Form.Item name="postingDate" label={<span className="font-bold text-slate-700 dark:text-slate-300">PO Date</span>} rules={[{ required: true }]} className="mb-0">
               <DatePicker style={{ width: '100%' }} />
             </Form.Item>
-            <Form.Item name="expectedDeliveryDate" label="Expected Delivery" style={{ width: 180 }}>
+            <Form.Item name="expectedDeliveryDate" label={<span className="font-bold text-slate-700 dark:text-slate-300">Expected Delivery</span>} className="mb-0">
               <DatePicker style={{ width: '100%' }} />
             </Form.Item>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '8px 0' }}>
-            <Text strong>Line items</Text>
-            <Button size="small" icon={<PlusOutlined />} onClick={() => setLines((ls) => [...ls, newLine()])}>Add line</Button>
-          </div>
-          <Table dataSource={lines} columns={lineColumns} rowKey="key" pagination={false} size="small" style={{ marginBottom: 16 }} />
+          <div className="pt-4 border-t border-slate-200">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="font-bold text-slate-800 dark:text-slate-200 flex items-center">
+                <ShoppingCart className="w-4 h-4 mr-2" /> Line Items
+              </h3>
+              <button type="button" onClick={() => setLines((ls) => [...ls, newLine()])} className="flex items-center text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded hover:bg-indigo-100 transition-colors">
+                <Plus className="w-3.5 h-3.5 mr-1" /> Add Line
+              </button>
+            </div>
+            
+            <div className="border border-slate-200 dark:border-slate-700/50 rounded-lg overflow-x-auto">
+              <table className="w-full text-sm text-left">
+                <thead className="bg-slate-50 dark:bg-slate-800/80 border-b dark:border-slate-700/50 text-xs text-slate-500 dark:text-slate-400 dark:text-slate-400 uppercase">
+                  <tr>
+                    <th className="px-4 py-3 font-bold w-64">Item</th>
+                    <th className="px-4 py-3 font-bold w-24">Qty</th>
+                    <th className="px-4 py-3 font-bold w-20">UOM</th>
+                    <th className="px-4 py-3 font-bold w-32">Rate (₹)</th>
+                    <th className="px-4 py-3 font-bold w-24">Disc %</th>
+                    <th className="px-4 py-3 font-bold w-32">Tax</th>
+                    <th className="px-4 py-3 font-bold text-right w-32">Net Total</th>
+                    <th className="px-4 py-3 font-bold w-12 text-center"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
+                  {lines.map((l) => (
+                    <tr key={l.key} className="bg-white hover:bg-slate-50/50">
+                      <td className="px-4 py-2">
+                        <Select showSearch optionFilterProp="label" placeholder="Select item" style={{ width: '100%' }} value={l.itemId} options={itemOptions} onChange={(v) => onPickItem(l.key, v)} />
+                      </td>
+                      <td className="px-4 py-2">
+                        <InputNumber min={0} value={l.quantity} onChange={(v) => setLine(l.key, { quantity: Number(v) || 0 })} style={{ width: '100%' }} />
+                      </td>
+                      <td className="px-4 py-2">
+                        <Input value={l.uom} onChange={(e) => setLine(l.key, { uom: e.target.value })} />
+                      </td>
+                      <td className="px-4 py-2">
+                        <InputNumber min={0} step={0.01} value={l.rateRupees} onChange={(v) => setLine(l.key, { rateRupees: Number(v) || 0 })} style={{ width: '100%' }} />
+                      </td>
+                      <td className="px-4 py-2">
+                        <InputNumber min={0} max={100} value={l.discountPercent} onChange={(v) => setLine(l.key, { discountPercent: Number(v) || 0 })} style={{ width: '100%' }} />
+                      </td>
+                      <td className="px-4 py-2">
+                        <Select allowClear placeholder="Tax" style={{ width: '100%' }} value={l.taxCodeId} options={taxOptions} onChange={(v) => setLine(l.key, { taxCodeId: v })} />
+                      </td>
+                      <td className="px-4 py-2 text-right font-mono font-bold text-slate-700 dark:text-slate-300">
+                        <AmountDisplay paise={lineComputed(l).totalAmountPaise} />
+                      </td>
+                      <td className="px-4 py-2 text-center">
+                        <Popconfirm title="Remove line?" onConfirm={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}>
+                          <button type="button" className="text-rose-400 hover:text-rose-600 p-1"><Trash2 className="w-4 h-4" /></button>
+                        </Popconfirm>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 32, padding: '8px 12px', background: dt.colorFillQuaternary, borderRadius: 8 }}>
-            <span><Text type="secondary">Net </Text><AmountDisplay paise={totals.net} /></span>
-            <span><Text type="secondary">Tax </Text><AmountDisplay paise={totals.tax} /></span>
-            <span><Text type="secondary">Total </Text><AmountDisplay paise={totals.total} bold /></span>
+            <div className="flex justify-end mt-4 p-4 bg-indigo-50 rounded-xl border border-indigo-100">
+              <div className="flex gap-8 text-sm">
+                <div className="flex flex-col items-end">
+                  <span className="text-slate-500 dark:text-slate-400 font-medium">Net Amount</span>
+                  <span className="font-mono text-slate-700 dark:text-slate-300"><AmountDisplay paise={totals.net} /></span>
+                </div>
+                <div className="flex flex-col items-end">
+                  <span className="text-slate-500 dark:text-slate-400 font-medium">Tax Amount</span>
+                  <span className="font-mono text-slate-700 dark:text-slate-300"><AmountDisplay paise={totals.tax} /></span>
+                </div>
+                <div className="flex flex-col items-end border-l border-indigo-200 pl-8">
+                  <span className="text-indigo-600 font-bold">Total Amount</span>
+                  <span className="font-mono font-bold text-indigo-700 text-lg"><AmountDisplay paise={totals.total} /></span>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <Form.Item name="remarks" label="Remarks" style={{ marginTop: 16 }}><Input.TextArea rows={2} /></Form.Item>
+          <Form.Item name="remarks" label={<span className="font-bold text-slate-700 dark:text-slate-300">Remarks / Terms</span>} className="mt-4">
+            <Input.TextArea rows={2} className="rounded-lg" placeholder="Enter terms and conditions, delivery instructions, etc." />
+          </Form.Item>
         </Form>
       </Drawer>
 
-      {/* View drawer */}
-      <Drawer title={viewing?.documentNumber ?? 'Purchase Order'} open={!!viewing} onClose={() => setViewing(null)} width={720}>
+      <Drawer 
+        title={
+          <div className="flex items-center space-x-2">
+            <Receipt className="w-5 h-5 text-indigo-600" />
+            <span className="font-bold text-slate-900 dark:text-white">{viewing?.documentNumber ?? 'Purchase Order'}</span>
+          </div>
+        } 
+        open={!!viewing} 
+        onClose={() => setViewing(null)} 
+        width={800}
+      >
         {viewing && (
-          <>
-            <Descriptions column={2} size="small" styles={{ label: { width: 130 } }}>
-              <Descriptions.Item label="Supplier">{supplierName(viewing.supplierId)}</Descriptions.Item>
-              <Descriptions.Item label="Status"><StatusBadge status={viewing.status} size="small" /></Descriptions.Item>
-              <Descriptions.Item label="Date">{viewing.postingDate}</Descriptions.Item>
-              <Descriptions.Item label="Total"><AmountDisplay paise={viewing.totalAmountPaise} /></Descriptions.Item>
-              <Descriptions.Item label="Remarks" span={2}>{viewing.remarks || '-'}</Descriptions.Item>
-            </Descriptions>
-            <Table style={{ marginTop: 16 }} size="small" rowKey="id" pagination={false}
-              dataSource={viewing.lines ?? []}
-              columns={[
-                { title: '#', dataIndex: 'lineNumber', width: 40 },
-                { title: 'Description', dataIndex: 'description' },
-                { title: 'Qty', dataIndex: 'quantity', align: 'right' as const },
-                { title: 'UOM', dataIndex: 'uom', width: 70 },
-                { title: 'Net', dataIndex: 'netAmountPaise', align: 'right' as const, render: (v: number) => <AmountDisplay paise={v} /> },
-                { title: 'Total', dataIndex: 'totalAmountPaise', align: 'right' as const, render: (v: number) => <AmountDisplay paise={v} /> },
-              ]} />
-          </>
+          <div className="space-y-6">
+            <div className="grid grid-cols-2 gap-4 p-5 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-700/50">
+              <div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Supplier</p>
+                <p className="font-medium text-slate-900 dark:text-white mt-1">{supplierName(viewing.supplierId)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Date</p>
+                <p className="font-medium text-slate-900 dark:text-white mt-1">{viewing.postingDate}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Status</p>
+                <div className="mt-1"><StatusBadge status={viewing.status} size="small" /></div>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Total Value</p>
+                <p className="font-bold font-mono text-indigo-700 text-lg mt-1"><AmountDisplay paise={viewing.totalAmountPaise} /></p>
+              </div>
+            </div>
+            
+            {viewing.remarks && (
+              <div className="p-4 bg-amber-50 rounded-lg border border-amber-100">
+                <p className="text-xs text-amber-700 font-bold uppercase tracking-wider mb-1">Remarks</p>
+                <p className="text-sm text-amber-900">{viewing.remarks}</p>
+              </div>
+            )}
+
+            <div>
+              <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-3 border-b pb-2">Order Items</h3>
+              <div className="border border-slate-200 dark:border-slate-700/50 rounded-lg overflow-x-auto">
+                <table className="w-full text-sm text-left">
+                  <thead className="bg-slate-50 dark:bg-slate-800/80 border-b dark:border-slate-700/50 text-xs text-slate-500 dark:text-slate-400 dark:text-slate-400 uppercase">
+                    <tr>
+                      <th className="px-4 py-3 font-bold w-12">#</th>
+                      <th className="px-4 py-3 font-bold">Item Description</th>
+                      <th className="px-4 py-3 font-bold text-right">Qty</th>
+                      <th className="px-4 py-3 font-bold">UOM</th>
+                      <th className="px-4 py-3 font-bold text-right">Net</th>
+                      <th className="px-4 py-3 font-bold text-right">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
+                    {viewing.lines?.map((l: any, i: number) => (
+                      <tr key={l.id} className="bg-white dark:bg-slate-900">
+                        <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{l.lineNumber || i + 1}</td>
+                        <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">{l.description || '—'}</td>
+                        <td className="px-4 py-3 text-right font-medium">{l.quantity}</td>
+                        <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{l.uom}</td>
+                        <td className="px-4 py-3 text-right font-mono"><AmountDisplay paise={l.netAmountPaise} /></td>
+                        <td className="px-4 py-3 text-right font-mono font-bold text-slate-700 dark:text-slate-300"><AmountDisplay paise={l.totalAmountPaise} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
         )}
       </Drawer>
     </div>
   );
 }
+
+export default PurchaseOrdersPage;
