@@ -18,7 +18,8 @@ export type DocumentStatus =
   | 'completed'
   | 'closed'
   | 'open'
-  | 'overdue';
+  | 'overdue'
+  | 'dispatched';
 
 const STATUS_CONFIG: Record<
   DocumentStatus,
@@ -34,6 +35,7 @@ const STATUS_CONFIG: Record<
   closed:     { label: 'Closed',     color: 'default' },
   open:       { label: 'Open',       color: 'processing' },
   overdue:    { label: 'Overdue',    color: 'error' },
+  dispatched: { label: 'Dispatched', color: 'cyan' },
 };
 
 interface StatusBadgeProps {

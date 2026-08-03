@@ -103,6 +103,7 @@ export const grnCreateSchema = docHeaderBase.extend({
   supplierDcDate: isoDate.optional(),
   gateEntryNo: z.string().max(50).optional(),
   vehicleNo: z.string().max(20).optional(),
+  landedChargesPaise: paisePos.default(0),
   lines: z
     .array(
       docLineSchema

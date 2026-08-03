@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, sql, inArray } from 'drizzle-orm';
 import {
   db,
   customers, customerAddresses,
@@ -292,9 +292,39 @@ function registerQuotations(app: FastifyInstance) {
       assertAllOwned(taxCodes, d.lines.map((l) => l.taxCodeId), cid, 'Tax code'),
       assertAllOwned(warehouses, d.lines.map((l) => l.warehouseId), cid, 'Warehouse'),
     ]);
+
+    const itemRecords = await db.select({
+      id: items.id,
+      itemCode: items.itemCode,
+      itemName: items.itemName,
+      minSellingPricePaise: items.minSellingPricePaise,
+      purchaseRatePaise: items.purchaseRatePaise,
+      standardCostPaise: items.standardCostPaise,
+    }).from(items).where(and(
+      eq(items.companyId, cid),
+      inArray(items.id, d.lines.map((l) => l.itemId))
+    ));
+    const itemMap = new Map(itemRecords.map((i) => [i.id, i]));
+
     const { fiscalYear } = fiscalPeriod(new Date(d.postingDate));
     const computed = d.lines.map((l) => computeLine(l));
     const totals = headerTotals(computed);
+
+    const allowBelowMin = await app.permissionService.check(userId(request), 'sales.so.allow_below_min_price', cid);
+    if (!allowBelowMin) {
+      for (let i = 0; i < d.lines.length; i++) {
+        const l = d.lines[i];
+        const it = itemMap.get(l.itemId);
+        if (it && it.minSellingPricePaise > 0) {
+          const netUnitPrice = l.quantity > 0 ? Math.round(computed[i].netAmountPaise / l.quantity) : l.ratePaise;
+          if (netUnitPrice < it.minSellingPricePaise) {
+            return reply.code(409).send({
+              error: `Line rate ₹${(netUnitPrice / 100).toFixed(2)} for item '${it.itemCode}' is below the minimum selling price floor ₹${(it.minSellingPricePaise / 100).toFixed(2)}.`,
+            });
+          }
+        }
+      }
+    }
 
     const created = await db.transaction(async (tx) => {
       const documentNumber = await app.numberSeriesService.next(tx, tenant(request).companyId, DOC, { fiscalYear, plantId: d.plantId });
@@ -307,15 +337,26 @@ function registerQuotations(app: FastifyInstance) {
         totalAmountPaise: totals.totalAmountPaise, createdBy: userId(request),
       }).returning();
       await tx.insert(salesQuotationLines).values(
-        d.lines.map((l, i) => ({
-          quotationId: q.id, lineNumber: i + 1, itemId: l.itemId, description: l.description,
-          quantity: l.quantity.toString(), uom: l.uom, ratePaise: l.ratePaise,
-          discountPercent: String(l.discountPercent ?? 0), discountPaise: computed[i].discountPaise,
-          netAmountPaise: computed[i].netAmountPaise, taxCodeId: l.taxCodeId, hsnSacCode: l.hsnSacCode,
-          cgstAmountPaise: computed[i].cgstAmountPaise, sgstAmountPaise: computed[i].sgstAmountPaise,
-          igstAmountPaise: computed[i].igstAmountPaise, cessAmountPaise: computed[i].cessAmountPaise,
-          taxAmountPaise: computed[i].taxAmountPaise, totalAmountPaise: computed[i].totalAmountPaise,
-        }))
+        d.lines.map((l, i) => {
+          const it = itemMap.get(l.itemId);
+          const estCost = (it?.purchaseRatePaise && it.purchaseRatePaise > 0) ? it.purchaseRatePaise : (it?.standardCostPaise || 0);
+          const netUnitPrice = l.quantity > 0 ? Math.round(computed[i].netAmountPaise / l.quantity) : l.ratePaise;
+          const estMargin = netUnitPrice > 0 ? Number((((netUnitPrice - estCost) / netUnitPrice) * 100).toFixed(2)) : 0;
+          return {
+            quotationId: q.id, lineNumber: i + 1, itemId: l.itemId, description: l.description,
+            quantity: l.quantity.toString(), uom: l.uom, ratePaise: l.ratePaise,
+            discountPercent: String(l.discountPercent ?? 0), discountPaise: computed[i].discountPaise,
+            netAmountPaise: computed[i].netAmountPaise, taxCodeId: l.taxCodeId, hsnSacCode: l.hsnSacCode,
+            cgstAmountPaise: computed[i].cgstAmountPaise, sgstAmountPaise: computed[i].sgstAmountPaise,
+            igstAmountPaise: computed[i].igstAmountPaise, cessAmountPaise: computed[i].cessAmountPaise,
+            taxAmountPaise: computed[i].taxAmountPaise, totalAmountPaise: computed[i].totalAmountPaise,
+            custom_data: {
+              estimatedUnitCostPaise: estCost,
+              estimatedMarginPercent: estMargin,
+              minSellingPricePaise: it?.minSellingPricePaise || 0,
+            },
+          };
+        })
       );
       await app.auditEngine.logCreate({ companyId: tenant(request).companyId, documentType: DOC, documentId: q.id, documentNumber, performedBy: userId(request) }, q, { tx });
       return q;
@@ -357,9 +398,39 @@ function registerOrders(app: FastifyInstance) {
       assertAllOwned(taxCodes, d.lines.map((l) => l.taxCodeId), cid, 'Tax code'),
       assertAllOwned(warehouses, d.lines.map((l) => l.warehouseId), cid, 'Warehouse'),
     ]);
+
+    const itemRecords = await db.select({
+      id: items.id,
+      itemCode: items.itemCode,
+      itemName: items.itemName,
+      minSellingPricePaise: items.minSellingPricePaise,
+      purchaseRatePaise: items.purchaseRatePaise,
+      standardCostPaise: items.standardCostPaise,
+    }).from(items).where(and(
+      eq(items.companyId, cid),
+      inArray(items.id, d.lines.map((l) => l.itemId))
+    ));
+    const itemMap = new Map(itemRecords.map((i) => [i.id, i]));
+
     const { fiscalYear } = fiscalPeriod(new Date(d.postingDate));
     const computed = d.lines.map((l) => computeLine(l));
     const totals = headerTotals(computed);
+
+    const allowBelowMin = await app.permissionService.check(userId(request), 'sales.so.allow_below_min_price', cid);
+    if (!allowBelowMin) {
+      for (let i = 0; i < d.lines.length; i++) {
+        const l = d.lines[i];
+        const it = itemMap.get(l.itemId);
+        if (it && it.minSellingPricePaise > 0) {
+          const netUnitPrice = l.quantity > 0 ? Math.round(computed[i].netAmountPaise / l.quantity) : l.ratePaise;
+          if (netUnitPrice < it.minSellingPricePaise) {
+            return reply.code(409).send({
+              error: `Line rate ₹${(netUnitPrice / 100).toFixed(2)} for item '${it.itemCode}' is below the minimum selling price floor ₹${(it.minSellingPricePaise / 100).toFixed(2)}.`,
+            });
+          }
+        }
+      }
+    }
 
     const created = await db.transaction(async (tx) => {
       const documentNumber = await app.numberSeriesService.next(tx, tenant(request).companyId, DOC, { fiscalYear, plantId: d.plantId });
@@ -374,16 +445,27 @@ function registerOrders(app: FastifyInstance) {
         totalAmountPaise: totals.totalAmountPaise, createdBy: userId(request),
       }).returning();
       await tx.insert(salesOrderLines).values(
-        d.lines.map((l, i) => ({
-          soId: so.id, lineNumber: i + 1, quotationLineId: l.quotationLineId, itemId: l.itemId,
-          description: l.description, quantity: l.quantity.toString(), uom: l.uom, ratePaise: l.ratePaise,
-          discountPercent: String(l.discountPercent ?? 0), discountPaise: computed[i].discountPaise,
-          netAmountPaise: computed[i].netAmountPaise, taxCodeId: l.taxCodeId, hsnSacCode: l.hsnSacCode,
-          cgstAmountPaise: computed[i].cgstAmountPaise, sgstAmountPaise: computed[i].sgstAmountPaise,
-          igstAmountPaise: computed[i].igstAmountPaise, cessAmountPaise: computed[i].cessAmountPaise,
-          taxAmountPaise: computed[i].taxAmountPaise, totalAmountPaise: computed[i].totalAmountPaise,
-          warehouseId: l.warehouseId,
-        }))
+        d.lines.map((l, i) => {
+          const it = itemMap.get(l.itemId);
+          const estCost = (it?.purchaseRatePaise && it.purchaseRatePaise > 0) ? it.purchaseRatePaise : (it?.standardCostPaise || 0);
+          const netUnitPrice = l.quantity > 0 ? Math.round(computed[i].netAmountPaise / l.quantity) : l.ratePaise;
+          const estMargin = netUnitPrice > 0 ? Number((((netUnitPrice - estCost) / netUnitPrice) * 100).toFixed(2)) : 0;
+          return {
+            soId: so.id, lineNumber: i + 1, quotationLineId: l.quotationLineId, itemId: l.itemId,
+            description: l.description, quantity: l.quantity.toString(), uom: l.uom, ratePaise: l.ratePaise,
+            discountPercent: String(l.discountPercent ?? 0), discountPaise: computed[i].discountPaise,
+            netAmountPaise: computed[i].netAmountPaise, taxCodeId: l.taxCodeId, hsnSacCode: l.hsnSacCode,
+            cgstAmountPaise: computed[i].cgstAmountPaise, sgstAmountPaise: computed[i].sgstAmountPaise,
+            igstAmountPaise: computed[i].igstAmountPaise, cessAmountPaise: computed[i].cessAmountPaise,
+            taxAmountPaise: computed[i].taxAmountPaise, totalAmountPaise: computed[i].totalAmountPaise,
+            warehouseId: l.warehouseId,
+            custom_data: {
+              estimatedUnitCostPaise: estCost,
+              estimatedMarginPercent: estMargin,
+              minSellingPricePaise: it?.minSellingPricePaise || 0,
+            },
+          };
+        })
       );
       await app.auditEngine.logCreate({ companyId: tenant(request).companyId, documentType: DOC, documentId: so.id, documentNumber, performedBy: userId(request) }, so, { tx });
       return so;
@@ -440,18 +522,20 @@ function registerOrders(app: FastifyInstance) {
     try {
       await db.transaction(async (tx) => {
         // Write stock reservations
-        for (const l of lines) {
+        for (let i = 0; i < lines.length; i++) {
+          const l = lines[i];
           if (l.warehouseId) {
             await tx.insert(stockReservations).values({
               companyId: cid,
               plantId: so.plantId,
               warehouseId: l.warehouseId,
               itemId: l.itemId,
-              soId: so.id,
-              soLineId: l.id,
-              reservedQty: l.quantity,
-              uom: l.uom,
-              status: 'reserved',
+              documentType: 'sales.order',
+              documentId: so.id,
+              documentNumber: so.documentNumber,
+              documentLineNumber: l.lineNumber ?? (i + 1),
+              reservedQty: String(l.quantity),
+              status: 'active',
               createdBy: uid,
             });
           }
@@ -784,6 +868,9 @@ function registerReceipts(app: FastifyInstance) {
     });
     return reply.code(201).send(created);
   });
+
+  app.get('/receipts', { preHandler: [app.authenticate, resolveTenantContext, authorize('sales.receipt.view')] },
+    async (request) => listHeaders(request, salesReceipts));
 
   app.get('/receipts/:id', { preHandler: [app.authenticate, resolveTenantContext, authorize('sales.receipt.view')] },
     async (request, reply) => {

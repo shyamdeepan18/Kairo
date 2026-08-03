@@ -98,7 +98,14 @@ export function PurchaseOrdersPage() {
 
   const onPickItem = (key: number, itemId: string) => {
     const it = items.find((i) => i.id === itemId);
-    setLine(key, { itemId, uom: it?.primaryUom, description: it?.itemName, taxCodeId: it?.defaultTaxCodeId ?? undefined });
+    const suggestedRate = (it?.purchaseRatePaise || it?.standardCostPaise || 0) / 100;
+    setLine(key, {
+      itemId,
+      uom: it?.primaryUom,
+      description: it?.itemName,
+      taxCodeId: it?.defaultTaxCodeId ?? undefined,
+      ...(suggestedRate > 0 ? { rateRupees: suggestedRate } : {}),
+    });
   };
 
   const lineComputed = (l: DraftLine) => computeLine(l.quantity || 0, Math.round((l.rateRupees || 0) * 100), l.discountPercent || 0, gstBp(l.taxCodeId));
@@ -208,7 +215,10 @@ export function PurchaseOrdersPage() {
     catch (e) { message.error(apiErr(e)); }
   };
 
-  const itemOptions = items.map((i) => ({ value: i.id, label: `${i.itemCode} — ${i.itemName}` }));
+  const itemOptions = items.map((i) => ({
+    value: i.id,
+    label: `${i.itemCode} — ${i.itemName}${i.barcode ? ` [${i.barcode}]` : ''}`,
+  }));
   const taxOptions = taxCodes.map((t) => ({ value: t.id, label: `${t.code} (${t.gstRateBp / 100}%)` }));
 
   return (

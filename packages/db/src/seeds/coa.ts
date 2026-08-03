@@ -107,6 +107,7 @@ const ACCOUNTS: AccountDef[] = [
   // ── Expenses ──────────────────────────────────────────────────────────
   { code: '4000', name: 'Expenses',              accountType: 'expense',   normalBalance: 'debit',  isGroup: true },
   { code: '4100', name: 'Material Costs',        accountType: 'expense',   normalBalance: 'debit',  isGroup: true,  parentCode: '4000' },
+  { code: '4105', name: 'Cost of Goods Sold',    accountType: 'expense',   normalBalance: 'debit',  isGroup: false, parentCode: '4100', postingCategory: 'cogs' },
   { code: '4110', name: 'Raw Material Consumed', accountType: 'expense',   normalBalance: 'debit',  isGroup: false, parentCode: '4100', postingCategory: 'raw_material_consumed' },
   { code: '4120', name: 'Packaging Material',    accountType: 'expense',   normalBalance: 'debit',  isGroup: false, parentCode: '4100' },
   { code: '4200', name: 'Direct Labour',         accountType: 'expense',   normalBalance: 'debit',  isGroup: true,  parentCode: '4000' },

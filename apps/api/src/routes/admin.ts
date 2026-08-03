@@ -16,7 +16,7 @@ import {
   companies, plants, users, roles, userRoles, companyLicense, userRoles as userRolesTable, companyUsers,
   permissions, rolePermissions, companyModules, documentNumberSeries
 } from '@erp/db';
-import { eq, and, inArray, desc, sql } from 'drizzle-orm';
+import { eq, and, inArray, desc, sql, getTableColumns, isNull } from 'drizzle-orm';
 import argon2 from 'argon2';
 import { LicenseService } from '../services/license-service.js';
 import type { PermissionService } from '../services/permissions.js';
@@ -161,7 +161,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     preHandler: [app.authenticate, (req, reply) => requireSystemAdmin(req, reply)],
   }, async (req) => {
     const list = await db.select({
-      ...plants,
+      ...getTableColumns(plants),
       userCount: sql<number>`cast(count(distinct ${userRoles.userId}) as integer)`,
     }).from(plants)
       .leftJoin(userRoles, eq(userRoles.plantId, plants.id))
@@ -301,7 +301,12 @@ export default async function adminRoutes(app: FastifyInstance) {
         );
         for (const sr of sourceRoles) {
           const existingRole = await tx.select().from(userRoles).where(
-            and(eq(userRoles.userId, u.id), eq(userRoles.companyId, companyId), eq(userRoles.roleId, sr.roleId), eq(userRoles.plantId, sr.plantId))
+            and(
+              eq(userRoles.userId, u.id),
+              eq(userRoles.companyId, companyId),
+              eq(userRoles.roleId, sr.roleId),
+              sr.plantId ? eq(userRoles.plantId, sr.plantId) : isNull(userRoles.plantId)
+            )
           ).limit(1);
           if (!existingRole.length) {
             await tx.insert(userRoles).values({
@@ -710,27 +715,30 @@ export default async function adminRoutes(app: FastifyInstance) {
   }, async (req, reply) => {
     try {
       // Query pg_stat_statements for top 10 slowest queries
-      const { rows: slowQueries } = await db.execute(sql`
+      const slowQueriesResult = await db.execute(sql`
         SELECT query, calls, total_exec_time, mean_exec_time, rows 
         FROM pg_stat_statements 
         ORDER BY total_exec_time DESC 
         LIMIT 10
-      `);
+      `).catch(() => []);
+      const slowQueries = Array.isArray(slowQueriesResult) ? slowQueriesResult : (slowQueriesResult as any)?.rows ?? [];
 
       // Query active connections
-      const { rows: activeConnections } = await db.execute(sql`
+      const activeConnectionsResult = await db.execute(sql`
         SELECT count(*) as count 
         FROM pg_stat_activity 
         WHERE state = 'active'
-      `);
+      `).catch(() => [{ count: 0 }]);
+      const activeConnections = Array.isArray(activeConnectionsResult) ? activeConnectionsResult : (activeConnectionsResult as any)?.rows ?? [];
+      const activeCount = Number(activeConnections[0]?.count ?? 0);
 
       return {
         ok: true,
         slowQueries,
-        activeConnections: activeConnections[0]?.count || 0
+        activeConnections: activeCount,
       };
     } catch (error: any) {
-      if (error.message.includes('pg_stat_statements')) {
+      if (error?.message?.includes('pg_stat_statements')) {
         return reply.code(500).send({ 
           ok: false, 
           error: 'pg_stat_statements extension is not installed or preloaded. Please restart the database container.' 
@@ -747,7 +755,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     const limit = Number(req.query.limit) || 50;
     const offset = Number(req.query.offset) || 0;
 
-    const list = await db.execute(sql`
+    const listResult = await db.execute(sql`
       SELECT 
         a.id, a.action, a.entity, a.entity_id as "entityId", 
         a.details, a.ip_address as "ipAddress", a.created_at as "createdAt",
@@ -758,13 +766,16 @@ export default async function adminRoutes(app: FastifyInstance) {
       ORDER BY a.created_at DESC
       LIMIT ${limit} OFFSET ${offset}
     `);
+    const logs = Array.isArray(listResult) ? listResult : (listResult as any)?.rows ?? [];
 
     // Get total count
-    const [{ count }] = await db.execute(sql`SELECT count(*) FROM audit_logs`);
+    const countResult: any = await db.execute(sql`SELECT count(*) as count FROM audit_logs`);
+    const countRows = Array.isArray(countResult) ? countResult : countResult?.rows ?? [];
+    const total = Number(countRows[0]?.count ?? 0);
 
     return { 
-      logs: list.rows, 
-      total: Number(count) 
+      logs, 
+      total 
     };
   });
 }

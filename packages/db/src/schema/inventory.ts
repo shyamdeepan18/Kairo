@@ -205,6 +205,8 @@ export const items = pgTable(
     hsnSacCode: varchar('hsn_sac_code', { length: 10 }),
     /** Default tax code for this item — overridable per document line */
     defaultTaxCodeId: uuid('default_tax_code_id'),
+    /** Barcode / EAN / UPC for scanning */
+    barcode: varchar('barcode', { length: 50 }),
 
     // ── Inventory behaviour ────────────────────────────────────────────────
     /** false for service items — no stock movements */
@@ -213,14 +215,30 @@ export const items = pgTable(
     trackingType: varchar('tracking_type', { length: 10 }).default('none').notNull(),
     /** ValuationMethod: 'weighted_average' | 'fifo'. Default: weighted_average */
     valuationMethod: varchar('valuation_method', { length: 20 }).default('weighted_average').notNull(),
+    /** Shelf life in days for batch expiry auto-calculation */
+    shelfLifeDays: integer('shelf_life_days').default(0).notNull(),
+    /** Gross weight per primary UOM unit */
+    grossWeight: numeric('gross_weight', { precision: 12, scale: 4 }),
+    /** Weight UOM (e.g. KG, G, LB) */
+    weightUom: varchar('weight_uom', { length: 20 }),
+    /** Whether incoming goods require QC inspection before stock release */
+    isQcRequired: boolean('is_qc_required').default(false).notNull(),
 
-    // ── Costing ───────────────────────────────────────────────────────────
+    // ── Pricing & Costing ──────────────────────────────────────────────────
     /** Standard cost in paise per primaryUom unit (for variance analysis) */
     standardCostPaise: integer('standard_cost_paise').default(0).notNull(),
+    /** Default selling price / list price in paise */
+    sellingPricePaise: integer('selling_price_paise').default(0).notNull(),
+    /** Minimum selling price floor in paise (blocks discounts below floor) */
+    minSellingPricePaise: integer('min_selling_price_paise').default(0).notNull(),
+    /** Standard / last purchase price in paise */
+    purchaseRatePaise: integer('purchase_rate_paise').default(0).notNull(),
 
-    // ── Reorder ───────────────────────────────────────────────────────────
+    // ── Reorder & Stock Limits ─────────────────────────────────────────────
     reorderLevelQty: numeric('reorder_level_qty', { precision: 18, scale: 4 }).default('0').notNull(),
     reorderQty: numeric('reorder_qty', { precision: 18, scale: 4 }).default('0').notNull(),
+    safetyStockQty: numeric('safety_stock_qty', { precision: 18, scale: 4 }).default('0').notNull(),
+    maxStockLevel: numeric('max_stock_level', { precision: 18, scale: 4 }).default('0').notNull(),
     /** Days from PO to expected delivery */
     leadTimeDays: integer('lead_time_days').default(0).notNull(),
     minOrderQty: numeric('min_order_qty', { precision: 18, scale: 4 }).default('1').notNull(),
@@ -646,11 +664,15 @@ export const stockTransfers = pgTable(
 
     companyId: uuid('company_id').notNull().references(() => companies.id),
     plantId:   uuid('plant_id').notNull().references(() => plants.id),
+    fromPlantId: uuid('from_plant_id').references(() => plants.id),
+    toPlantId:   uuid('to_plant_id').references(() => plants.id),
 
     documentNumber: varchar('document_number', { length: 50 }).notNull(),
     postingDate: date('posting_date').notNull(),
     fiscalYear: varchar('fiscal_year', { length: 5 }).notNull(),
     period: smallint('period').notNull(),
+
+    transferType: varchar('transfer_type', { length: 30 }).default('direct').notNull(),
 
     fromWarehouseId: uuid('from_warehouse_id').notNull().references(() => warehouses.id),
     toWarehouseId: uuid('to_warehouse_id').notNull().references(() => warehouses.id),
@@ -658,6 +680,9 @@ export const stockTransfers = pgTable(
     reason: text('reason'),
     remarks: text('remarks'),
     vehicleNo: varchar('vehicle_no', { length: 30 }),
+    driverName: varchar('driver_name', { length: 100 }),
+    driverPhone: varchar('driver_phone', { length: 20 }),
+    lrNumber: varchar('lr_number', { length: 50 }),
 
     status: varchar('status', { length: 20 }).default('draft').notNull(),
     totalAmountPaise: integer('total_amount_paise').default(0).notNull(),
@@ -666,6 +691,10 @@ export const stockTransfers = pgTable(
     submittedBy: uuid('submitted_by').references(() => users.id),
     approvedAt: timestamp('approved_at', { withTimezone: true }),
     approvedBy: uuid('approved_by').references(() => users.id),
+    dispatchedAt: timestamp('dispatched_at', { withTimezone: true }),
+    dispatchedBy: uuid('dispatched_by').references(() => users.id),
+    receivedAt: timestamp('received_at', { withTimezone: true }),
+    receivedBy: uuid('received_by').references(() => users.id),
     rejectedAt: timestamp('rejected_at', { withTimezone: true }),
     rejectedBy: uuid('rejected_by').references(() => users.id),
 

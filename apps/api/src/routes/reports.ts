@@ -334,6 +334,43 @@ const reportsRoutes: FastifyPluginAsync = async (fastify) => {
       reply.status(500).send({ error: 'Failed to fetch Purchase Report' });
     }
   });
+
+  // ─── SALES PROFITABILITY & COGS REPORT ─────────────────────────────────────
+  fastify.get('/sales-profitability', async (request, reply) => {
+    try {
+      const { companyId } = tenant(request);
+      const query = sql`
+        SELECT
+          i.id as item_id,
+          i.item_code,
+          i.item_name,
+          c.name as customer_name,
+          COALESCE(SUM(CAST(dnl.delivered_qty AS numeric)), 0) as total_delivered_qty,
+          COALESCE(SUM(dnl.net_amount_paise), 0) as total_revenue_paise,
+          COALESCE(SUM(dnl.cogs_amount_paise), 0) as total_cogs_paise,
+          (COALESCE(SUM(dnl.net_amount_paise), 0) - COALESCE(SUM(dnl.cogs_amount_paise), 0)) as gross_profit_paise,
+          CASE
+            WHEN COALESCE(SUM(dnl.net_amount_paise), 0) > 0 THEN
+              ROUND(((COALESCE(SUM(dnl.net_amount_paise), 0) - COALESCE(SUM(dnl.cogs_amount_paise), 0))::numeric / COALESCE(SUM(dnl.net_amount_paise), 1)::numeric) * 100, 2)
+            ELSE 0
+          END as gross_margin_percent
+        FROM delivery_note_lines dnl
+        JOIN delivery_notes dn ON dnl.delivery_note_id = dn.id
+        JOIN items i ON dnl.item_id = i.id
+        JOIN customers c ON dn.customer_id = c.id
+        WHERE dn.company_id = ${companyId}
+          AND dn.status = 'approved'
+        GROUP BY i.id, i.item_code, i.item_name, c.name
+        ORDER BY gross_profit_paise DESC
+      `;
+      const result: any = await db.execute(query);
+      return Array.isArray(result) ? result : (result.rows ?? []);
+    } catch (error) {
+      request.log.error(error);
+      reply.status(500).send({ error: 'Failed to fetch Sales Profitability Report' });
+    }
+  });
 };
 
 export default reportsRoutes;
+

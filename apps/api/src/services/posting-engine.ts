@@ -139,7 +139,7 @@ export class PostingEngine {
    * @returns journalEntry.id of the created entry
    */
   async post(
-    tx: DB,
+    tx: any,
     ctx: PostingContext,
     performedBy: string
   ): Promise<string> {
@@ -223,7 +223,7 @@ export class PostingEngine {
    * @returns journalEntry.id of the new reversal entry
    */
   async reverse(
-    tx: DB,
+    tx: any,
     originalEntryId: string,
     postingDate: Date,
     performedBy: string,

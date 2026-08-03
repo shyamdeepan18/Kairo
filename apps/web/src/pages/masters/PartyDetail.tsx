@@ -10,7 +10,7 @@ import {
   ArrowLeftOutlined, SaveOutlined, PlusOutlined, BankOutlined,
 } from '@ant-design/icons';
 import {
-  mastersApi, SUPPLIER_TYPES, CUSTOMER_TYPES,
+  mastersApi, SUPPLIER_TYPES, CUSTOMER_TYPES, MSME_TYPES, CUSTOMER_TIERS, SHIPPING_TERMS_OPTIONS,
   type Supplier, type Customer, type CustomerAddress, type PartyTransaction,
 } from '../../api/masters';
 import { usePlantStore } from '../../store/plant';
@@ -140,7 +140,7 @@ function PartyDetail({ kind }: { kind: Kind }) {
         </Row>
 
         <Divider className="my-5" />
-        <span className="block mb-4 text-xs font-semibold tracking-wide uppercase text-slate-500 dark:text-slate-400">Tax {isSupplier && '& Address'}</span>
+        <span className="block mb-4 text-xs font-semibold tracking-wide uppercase text-slate-500 dark:text-slate-400">Tax & Compliance</span>
         <Row gutter={20}>
           <Col xs={24} sm={10}>
             <Form.Item name="gstin" label="GSTIN" rules={[{ len: 15, message: '15 characters' }]}>
@@ -159,6 +159,16 @@ function PartyDetail({ kind }: { kind: Kind }) {
           </Col>
           {isSupplier && (
             <>
+              <Col xs={24} sm={12}>
+                <Form.Item name="msmeType" label="MSME Classification">
+                  <Select options={MSME_TYPES} placeholder="Select MSME category" />
+                </Form.Item>
+              </Col>
+              <Col xs={24} sm={12}>
+                <Form.Item name="msmeRegNo" label="MSME / Udyam Reg No">
+                  <Input placeholder="UDYAM-XX-00-0000000" style={{ fontFamily: 'monospace' }} />
+                </Form.Item>
+              </Col>
               <Col xs={24}><Form.Item name="address" label="Address"><Input.TextArea rows={2} /></Form.Item></Col>
               <Col xs={24} sm={10}><Form.Item name="city" label="City"><Input /></Form.Item></Col>
               <Col xs={24} sm={8}><Form.Item name="state" label="State"><Input /></Form.Item></Col>
@@ -168,14 +178,23 @@ function PartyDetail({ kind }: { kind: Kind }) {
         </Row>
 
         <Divider className="my-5" />
-        <span className="block mb-4 text-xs font-semibold tracking-wide uppercase text-slate-500 dark:text-slate-400">Commercial</span>
+        <span className="block mb-4 text-xs font-semibold tracking-wide uppercase text-slate-500 dark:text-slate-400">Commercial & Delivery</span>
         <Row gutter={20}>
           <Col xs={24} sm={8}><Form.Item name="paymentTermsDays" label="Payment Terms (days)"><InputNumber min={0} max={365} style={{ width: '100%' }} /></Form.Item></Col>
           <Col xs={24} sm={8}><Form.Item name="creditLimitRupees" label="Credit Limit (₹)"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
-          {!isSupplier && (
+          {isSupplier ? (
             <>
+              <Col xs={24} sm={8}><Form.Item name="incoterms" label="Standard Incoterms"><Input placeholder="e.g. FOB, CIF" /></Form.Item></Col>
+              <Col xs={24} sm={8}><Form.Item name="defaultLeadTimeDays" label="Default Lead Time (days)"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
+            </>
+          ) : (
+            <>
+              <Col xs={24} sm={8}><Form.Item name="customerTier" label="Customer Tier"><Select allowClear options={CUSTOMER_TIERS} placeholder="Select tier" /></Form.Item></Col>
               <Col xs={24} sm={8}><Form.Item name="defaultDiscountPercent" label="Default Discount (%)"><InputNumber min={0} max={100} step={0.5} style={{ width: '100%' }} /></Form.Item></Col>
-              <Col xs={24} sm={8}><Form.Item name="creditHold" label="Credit Hold" valuePropName="checked"><Switch /></Form.Item></Col>
+              <Col xs={24} sm={8}><Form.Item name="gracePeriodDays" label="Grace Period (days)" extra="Past due grace"><InputNumber min={0} max={90} style={{ width: '100%' }} /></Form.Item></Col>
+              <Col xs={24} sm={8}><Form.Item name="shippingTerms" label="Shipping Terms"><Select allowClear options={SHIPPING_TERMS_OPTIONS} placeholder="Shipping terms" /></Form.Item></Col>
+              <Col xs={24} sm={8}><Form.Item name="preferredTransporter" label="Preferred Transporter"><Input placeholder="e.g. VRL, TCI Express" /></Form.Item></Col>
+              <Col xs={24} sm={8}><Form.Item name="creditHold" label="Credit Hold" valuePropName="checked" extra="Block new orders"><Switch /></Form.Item></Col>
             </>
           )}
           <Col xs={24} sm={8}><Form.Item name="isActive" label="Active" valuePropName="checked"><Switch /></Form.Item></Col>

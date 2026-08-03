@@ -290,6 +290,8 @@ export function DeliveriesPage() {
                       <th className="px-4 py-3 font-bold">Item Description</th>
                       <th className="px-4 py-3 font-bold text-right">Delivered Qty</th>
                       <th className="px-4 py-3 font-bold">UOM</th>
+                      <th className="px-4 py-3 font-bold text-right">COGS Rate (₹)</th>
+                      <th className="px-4 py-3 font-bold text-right">Total COGS (₹)</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
@@ -299,6 +301,12 @@ export function DeliveriesPage() {
                         <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">{l.description || '—'}</td>
                         <td className="px-4 py-3 text-right font-medium text-amber-700 bg-amber-50">{l.deliveredQty}</td>
                         <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{l.uom}</td>
+                        <td className="px-4 py-3 text-right text-slate-700 dark:text-slate-300">
+                          {l.cogsRatePaise ? `₹${(Number(l.cogsRatePaise) / 100).toFixed(2)}` : '—'}
+                        </td>
+                        <td className="px-4 py-3 text-right font-mono font-bold text-amber-600">
+                          {l.cogsAmountPaise ? `₹${(Number(l.cogsAmountPaise) / 100).toFixed(2)}` : '—'}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
-import { Table, Button, Drawer, Form, DatePicker, Input, Select, Typography, Descriptions, message } from 'antd';
+import { Table, Button, Drawer, Form, DatePicker, Input, Select, Typography, Descriptions, Tag, message } from 'antd';
 import dayjs from 'dayjs';
 import { PlusOutlined, EyeOutlined } from '@ant-design/icons';
 import { FileText, Plus, Eye, Search, Send, CheckCircle2, XCircle, FileSignature } from 'lucide-react';
@@ -52,7 +52,18 @@ export function QuotationsPage() {
     settingsApi.listTaxCodes(company.id).then(setTaxCodes).catch(() => {});
   }, [company?.id]);
 
-  const refItems: RefItem[] = items.map((i) => ({ id: i.id, itemName: i.itemName, itemCode: i.itemCode, primaryUom: i.primaryUom, defaultTaxCodeId: i.defaultTaxCodeId }));
+  const refItems: RefItem[] = items.map((i) => ({
+    id: i.id,
+    itemName: i.itemName,
+    itemCode: i.itemCode,
+    primaryUom: i.primaryUom,
+    defaultTaxCodeId: i.defaultTaxCodeId,
+    sellingPricePaise: i.sellingPricePaise,
+    purchaseRatePaise: i.purchaseRatePaise,
+    standardCostPaise: i.standardCostPaise,
+    minSellingPricePaise: i.minSellingPricePaise,
+    barcode: i.barcode,
+  }));
 
   const openNew = () => { form.resetFields(); form.setFieldsValue({ postingDate: dayjs() }); setLines([newDraftLine()]); setDrawer(true); };
   const save = async (v: any) => {
@@ -211,7 +222,22 @@ export function QuotationsPage() {
               dataSource={viewing.lines ?? []}
               columns={[
                 { title: '#', dataIndex: 'lineNumber', width: 40 },
-                { title: 'Description', dataIndex: 'description' },
+                { 
+                  title: 'Description', 
+                  dataIndex: 'description',
+                  render: (text: string, record: any) => (
+                    <div>
+                      <div>{text || '—'}</div>
+                      {record.customData?.estimatedMarginPercent !== undefined && (
+                        <div className="mt-1 flex items-center gap-1">
+                          <Tag color={Number(record.customData.estimatedMarginPercent) >= 20 ? 'success' : (Number(record.customData.estimatedMarginPercent) > 0 ? 'warning' : 'error')} style={{ fontSize: 10, borderRadius: 8, margin: 0 }}>
+                            Margin: {Number(record.customData.estimatedMarginPercent).toFixed(1)}% (Est Cost: ₹{(Number(record.customData.estimatedUnitCostPaise || 0) / 100).toFixed(2)})
+                          </Tag>
+                        </div>
+                      )}
+                    </div>
+                  )
+                },
                 { title: 'Qty', dataIndex: 'quantity', align: 'right' as const },
                 { title: 'UOM', dataIndex: 'uom', width: 70 },
                 { title: 'Net', dataIndex: 'netAmountPaise', align: 'right' as const, render: (v: number) => <AmountDisplay paise={v} /> },

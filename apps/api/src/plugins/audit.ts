@@ -18,7 +18,7 @@ export default fp(async (app: FastifyInstance) => {
 
     // Try to identify the user from JWT (assuming auth hook populates request.user)
     const userId = request.user?.id || null;
-    const companyId = request.user?.companyId || null;
+    const companyId = request.user?.activeCompanyId || null;
 
     // Infer entity and action from the URL and method
     const urlParts = request.url.split('?')[0].split('/').filter(Boolean); // e.g. ['api', 'sales', 'invoices', '123']

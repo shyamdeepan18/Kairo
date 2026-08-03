@@ -39,7 +39,7 @@ export class PermissionService {
     plantId?: string
   ): Promise<boolean> {
     const effective = await this.getEffectivePermissions(userId, companyId, plantId);
-    return effective.has(permissionCode);
+    return effective.has('*') || effective.has(permissionCode);
   }
 
   /**

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
-import { Drawer, Form, DatePicker, Input, Select, message } from 'antd';
+import { Drawer, Form, DatePicker, Input, Select, Tag, message } from 'antd';
 import dayjs from 'dayjs';
 import { ShoppingBag, Plus, Eye, Send, CheckCircle2, StopCircle, Search, FileText, User, Calendar, ClipboardList } from 'lucide-react';
 import { usePlantStore } from '../../store/plant';
@@ -77,7 +77,18 @@ export function SalesOrdersPage() {
     }
   }, [location.state, navigate, form]);
 
-  const refItems: RefItem[] = items.map((i) => ({ id: i.id, itemName: i.itemName, itemCode: i.itemCode, primaryUom: i.primaryUom, defaultTaxCodeId: i.defaultTaxCodeId }));
+  const refItems: RefItem[] = items.map((i) => ({
+    id: i.id,
+    itemName: i.itemName,
+    itemCode: i.itemCode,
+    primaryUom: i.primaryUom,
+    defaultTaxCodeId: i.defaultTaxCodeId,
+    sellingPricePaise: i.sellingPricePaise,
+    purchaseRatePaise: i.purchaseRatePaise,
+    standardCostPaise: i.standardCostPaise,
+    minSellingPricePaise: i.minSellingPricePaise,
+    barcode: i.barcode,
+  }));
 
   const openNew = () => { form.resetFields(); form.setFieldsValue({ postingDate: dayjs() }); setLines([newDraftLine()]); setSourceQuotationId(undefined); setDrawer(true); };
   
@@ -331,7 +342,16 @@ export function SalesOrdersPage() {
                     {viewing.lines?.map((l: any, i: number) => (
                       <tr key={l.id} className="bg-white dark:bg-slate-900">
                         <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{l.lineNumber || i + 1}</td>
-                        <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">{l.description || '—'}</td>
+                        <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">
+                          <div>{l.description || '—'}</div>
+                          {l.customData?.estimatedMarginPercent !== undefined && (
+                            <div className="mt-1 flex items-center gap-1">
+                              <Tag color={Number(l.customData.estimatedMarginPercent) >= 20 ? 'success' : (Number(l.customData.estimatedMarginPercent) > 0 ? 'warning' : 'error')} style={{ fontSize: 10, borderRadius: 8, margin: 0 }}>
+                                Margin: {Number(l.customData.estimatedMarginPercent).toFixed(1)}% (Est Cost: ₹{(Number(l.customData.estimatedUnitCostPaise || 0) / 100).toFixed(2)})
+                              </Tag>
+                            </div>
+                          )}
+                        </td>
                         <td className="px-4 py-3 text-right font-medium">{l.quantity}</td>
                         <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{l.uom}</td>
                         <td className="px-4 py-3 text-right font-mono"><AmountDisplay paise={l.netAmountPaise} /></td>

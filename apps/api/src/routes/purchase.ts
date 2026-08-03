@@ -476,7 +476,7 @@ function registerOrders(app: FastifyInstance) {
 
       await app.auditEngine.logTransition(
         { companyId: po.companyId, documentType: DOC, documentId: po.id, documentNumber: po.documentNumber, performedBy: userId(request) },
-        'draft', { status: 'draft', stampFields: {} }, 'Order modified', { tx }
+        'draft', { toStatus: 'draft', stampFields: {} }, 'Order modified', { tx }
       );
       
       return po;
@@ -514,7 +514,7 @@ function registerOrders(app: FastifyInstance) {
     if (req) {
       try {
         const res = await db.transaction((tx) => app.approvalEngine.act(tx, req.id, uid, 'approved', remarks, { companyId: cid, bypassSod }));
-        if (!res.finalized) return reply.send({ ok: true, status: 'submitted', detail: res });
+        if (!('finalized' in res)) return reply.send({ ok: true, status: 'submitted', detail: res });
         return reply.send({ ok: true, status: 'approved' }); // Finalized, status already updated by ApprovalEngine
       } catch (err) {
         return reply.code(409).send({ error: `Approval action failed: ${(err as Error).message}`, detail: (err as Error).message });
@@ -607,9 +607,27 @@ function registerGrns(app: FastifyInstance) {
     const { fiscalYear } = fiscalPeriod(new Date(d.postingDate));
     // value GRN lines on acceptedQty
     const computed = d.lines.map((l) =>
-      computeLine({ quantity: l.acceptedQty, ratePaise: l.ratePaise, discountPercent: l.discountPercent, discountPaise: l.discountPaise,
-        cgstAmountPaise: l.cgstAmountPaise, sgstAmountPaise: l.sgstAmountPaise, igstAmountPaise: l.igstAmountPaise, cessAmountPaise: l.cessAmountPaise }));
+      computeLine({ quantity: l.acceptedQty, ratePaise: l.ratePaise, discountPercent: l.discountPercent, discountPaise: l.discountPaise }));
     const totals = headerTotals(computed);
+
+    // Landed cost apportionment across accepted quantities
+    const totalNetPaise = totals.netAmountPaise;
+    const totalAcceptedQty = d.lines.reduce((sum, l) => sum + (l.acceptedQty || 0), 0);
+    const landedChargesPaise = d.landedChargesPaise ?? 0;
+
+    const lineValuationRates = d.lines.map((l, i) => {
+      if (landedChargesPaise > 0 && l.acceptedQty > 0) {
+        let lineLandedPaise = 0;
+        if (totalNetPaise > 0) {
+          lineLandedPaise = Math.round((computed[i].netAmountPaise / totalNetPaise) * landedChargesPaise);
+        } else if (totalAcceptedQty > 0) {
+          lineLandedPaise = Math.round((l.acceptedQty / totalAcceptedQty) * landedChargesPaise);
+        }
+        const landedPerUnitPaise = Math.round(lineLandedPaise / l.acceptedQty);
+        return l.ratePaise + landedPerUnitPaise;
+      }
+      return l.ratePaise;
+    });
 
     const created = await db.transaction(async (tx) => {
       const documentNumber = await app.numberSeriesService.next(tx, tenant(request).companyId, DOC, { fiscalYear, plantId: d.plantId });
@@ -625,10 +643,14 @@ function registerGrns(app: FastifyInstance) {
         d.lines.map((l, i) => ({
           grnId: grn.id, lineNumber: i + 1, poLineId: l.poLineId, itemId: l.itemId, description: l.description,
           receivedQty: l.receivedQty.toString(), acceptedQty: l.acceptedQty.toString(), rejectedQty: String(l.rejectedQty ?? 0),
-          uom: l.uom, ratePaise: l.ratePaise, valuationRatePaise: l.ratePaise, netAmountPaise: computed[i].netAmountPaise,
+          uom: l.uom, ratePaise: l.ratePaise, valuationRatePaise: lineValuationRates[i], netAmountPaise: computed[i].netAmountPaise,
           taxCodeId: l.taxCodeId, hsnSacCode: l.hsnSacCode, taxAmountPaise: computed[i].taxAmountPaise,
           totalAmountPaise: computed[i].totalAmountPaise, warehouseId: l.warehouseId ?? d.warehouseId,
           batchId: l.batchId, batchNumber: l.batchNumber, rejectionReason: l.rejectionReason,
+          custom_data: {
+            landedChargesAllocatedPaise: (lineValuationRates[i] - l.ratePaise) * l.acceptedQty,
+            landedRatePerUnitPaise: lineValuationRates[i] - l.ratePaise,
+          },
         }))
       );
       await app.auditEngine.logCreate(
@@ -677,7 +699,7 @@ function registerGrns(app: FastifyInstance) {
       const result = await db.transaction(async (tx) => {
         if (req) {
           const actRes = await app.approvalEngine.act(tx, req.id, uid, 'approved', remarks, { skipFinalizeDoc: true, companyId: cid, bypassSod });
-          if (!actRes.finalized) {
+          if (!('finalized' in actRes)) {
             return { status: 'submitted', detail: actRes };
           }
         }
@@ -685,10 +707,21 @@ function registerGrns(app: FastifyInstance) {
         await app.stockLedger.postBatch(tx, lines.map((l) => ({
           companyId: cid, plantId: grn.plantId, warehouseId: l.warehouseId ?? grn.warehouseId,
           itemId: l.itemId, movementType: 'purchase_receipt' as const,
-          quantity: parseFloat(l.acceptedQty), uom: l.uom, valuationRatePaise: l.ratePaise,
+          quantity: parseFloat(l.acceptedQty), uom: l.uom,
+          valuationRatePaise: (l.valuationRatePaise && l.valuationRatePaise > 0) ? l.valuationRatePaise : l.ratePaise,
           documentType: DOC, documentId: grn.id, documentNumber: grn.documentNumber, documentLineNumber: l.lineNumber,
           batchId: l.batchId ?? undefined, postingDate: new Date(grn.postingDate), createdBy: uid,
         })));
+
+        // 1b. Auto-update Last Purchase Rate in Item Master (atomic with GRN approval)
+        for (const l of lines) {
+          const effectiveRate = (l.valuationRatePaise && l.valuationRatePaise > 0) ? l.valuationRatePaise : l.ratePaise;
+          if (effectiveRate > 0) {
+            await tx.update(items)
+              .set({ purchaseRatePaise: effectiveRate, updatedAt: new Date() })
+              .where(and(eq(items.id, l.itemId), eq(items.companyId, cid)));
+          }
+        }
 
         // 2. GL post (DR inventory + input GST / CR GR-IR clearing)
         const { fiscalYear, period } = fiscalPeriod(new Date(grn.postingDate));
@@ -841,7 +874,7 @@ function registerInvoices(app: FastifyInstance) {
       const result = await db.transaction(async (tx) => {
         if (req) {
           const actRes = await app.approvalEngine.act(tx, req.id, uid, 'approved', remarks, { skipFinalizeDoc: true, companyId: cid, bypassSod });
-          if (!actRes.finalized) {
+          if (!('finalized' in actRes)) {
             return { status: 'submitted', detail: actRes };
           }
         }
@@ -983,7 +1016,7 @@ function registerPayments(app: FastifyInstance) {
       const result = await db.transaction(async (tx) => {
         if (req) {
           const actRes = await app.approvalEngine.act(tx, req.id, uid, 'approved', remarks, { skipFinalizeDoc: true, companyId: cid, bypassSod });
-          if (!actRes.finalized) {
+          if (!('finalized' in actRes)) {
             return { status: 'submitted', detail: actRes };
           }
         }
@@ -1116,7 +1149,7 @@ function simpleTransition(
       if (req) {
         try {
           const res = await db.transaction((tx) => app.approvalEngine.act(tx, req.id, uid, cfg.to as 'approved' | 'rejected', remarks, { companyId: cid, bypassSod }));
-          if (res.finalized) return reply.send({ ok: true, status: res.decision });
+          if ('finalized' in res) return reply.send({ ok: true, status: res.decision });
           return reply.send({ ok: true, status: 'submitted', detail: res });
         } catch (err) {
           return reply.code(409).send({ error: `Approval action failed: ${(err as Error).message}`, detail: (err as Error).message });

@@ -35,9 +35,18 @@ const app = Fastify({
 });
 
 async function start() {
-  // CORS — only the configured origin may make credentialed requests
+  // CORS — only the configured origin may make credentialed requests (allow any localhost port in dev)
   await app.register(cors, {
-    origin: config.cors.origin,
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true);
+      if (!config.isProd) {
+        if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+          return cb(null, true);
+        }
+      }
+      if (origin === config.cors.origin) return cb(null, true);
+      cb(new Error('Not allowed by CORS'), false);
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   });

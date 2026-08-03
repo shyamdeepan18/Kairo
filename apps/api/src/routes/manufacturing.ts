@@ -605,7 +605,7 @@ function registerOperations(app: FastifyInstance) {
        const [wc] = await db.select().from(workCenters).where(byTenantId(workCenters, op.workCenterId, cid)).limit(1);
        if (wc) {
           labourRatePaise = wc.labourRatePaise;
-          overheadRatePaise = op.overheadRatePaise > 0 ? op.overheadRatePaise : wc.overheadRatePaise;
+          overheadRatePaise = wc.overheadRatePaise;
        }
     }
 

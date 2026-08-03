@@ -33,6 +33,38 @@ export function ItemsPage() {
   const [drawer, setDrawer] = useState(false);
   const [editing, setEditing] = useState<Item | null>(null);
   const [saving, setSaving] = useState(false);
+  const [activeTab, setActiveTab] = useState('general');
+
+  const FIELD_META: Record<string, { label: string; tabKey: string; tabLabel: string }> = {
+    itemCode: { label: 'Item Code', tabKey: 'general', tabLabel: 'General' },
+    itemName: { label: 'Item Name', tabKey: 'general', tabLabel: 'General' },
+    description: { label: 'Description', tabKey: 'general', tabLabel: 'General' },
+    itemType: { label: 'Item Type', tabKey: 'general', tabLabel: 'General' },
+    itemGroupId: { label: 'Item Group', tabKey: 'general', tabLabel: 'General' },
+    barcode: { label: 'Barcode / EAN', tabKey: 'general', tabLabel: 'General' },
+    primaryUom: { label: 'Primary (Stock) UOM', tabKey: 'inventory', tabLabel: 'Inventory' },
+    secondaryUom: { label: 'Secondary UOM', tabKey: 'inventory', tabLabel: 'Inventory' },
+    conversionFactor: { label: 'Conversion Factor', tabKey: 'inventory', tabLabel: 'Inventory' },
+    isStockItem: { label: 'Maintain Stock', tabKey: 'inventory', tabLabel: 'Inventory' },
+    trackingType: { label: 'Tracking', tabKey: 'inventory', tabLabel: 'Inventory' },
+    shelfLifeDays: { label: 'Shelf Life (Days)', tabKey: 'inventory', tabLabel: 'Inventory' },
+    grossWeight: { label: 'Gross Weight', tabKey: 'inventory', tabLabel: 'Inventory' },
+    weightUom: { label: 'Weight UOM', tabKey: 'inventory', tabLabel: 'Inventory' },
+    isQcRequired: { label: 'QC Required', tabKey: 'inventory', tabLabel: 'Inventory' },
+    reorderLevelQty: { label: 'Reorder Level', tabKey: 'inventory', tabLabel: 'Inventory' },
+    reorderQty: { label: 'Reorder Qty', tabKey: 'inventory', tabLabel: 'Inventory' },
+    safetyStockQty: { label: 'Safety Stock', tabKey: 'inventory', tabLabel: 'Inventory' },
+    maxStockLevel: { label: 'Max Stock Level', tabKey: 'inventory', tabLabel: 'Inventory' },
+    leadTimeDays: { label: 'Lead Time', tabKey: 'inventory', tabLabel: 'Inventory' },
+    minOrderQty: { label: 'Minimum Order Qty', tabKey: 'inventory', tabLabel: 'Inventory' },
+    valuationMethod: { label: 'Valuation Method', tabKey: 'costing', tabLabel: 'Costing & Tax' },
+    standardCostRupees: { label: 'Standard Cost', tabKey: 'costing', tabLabel: 'Costing & Tax' },
+    sellingPriceRupees: { label: 'Selling Price', tabKey: 'costing', tabLabel: 'Costing & Tax' },
+    minSellingPriceRupees: { label: 'Min Selling Price', tabKey: 'costing', tabLabel: 'Costing & Tax' },
+    purchaseRateRupees: { label: 'Purchase Rate', tabKey: 'costing', tabLabel: 'Costing & Tax' },
+    hsnSacCode: { label: 'HSN / SAC Code', tabKey: 'costing', tabLabel: 'Costing & Tax' },
+    defaultTaxCodeId: { label: 'Default Tax Code', tabKey: 'costing', tabLabel: 'Costing & Tax' },
+  };
 
   const loadItems = useCallback((params?: { q?: string; itemType?: string }) => {
     if (!company?.id) return;
@@ -61,24 +93,54 @@ export function ItemsPage() {
 
   const open = (row: Item | null) => {
     setEditing(row);
+    setActiveTab('general');
     form.resetFields();
     if (row) {
-      form.setFieldsValue({ ...row, standardCostRupees: row.standardCostPaise ? row.standardCostPaise / 100 : 0 });
+      form.setFieldsValue({
+        ...row,
+        standardCostRupees: row.standardCostPaise ? row.standardCostPaise / 100 : 0,
+        sellingPriceRupees: row.sellingPricePaise ? row.sellingPricePaise / 100 : 0,
+        minSellingPriceRupees: row.minSellingPricePaise ? row.minSellingPricePaise / 100 : 0,
+        purchaseRateRupees: row.purchaseRatePaise ? row.purchaseRatePaise / 100 : 0,
+      });
     } else {
       form.setFieldsValue({
         itemType: 'raw_material', isStockItem: true, trackingType: 'none',
         valuationMethod: 'weighted_average', standardCostRupees: 0,
+        sellingPriceRupees: 0, minSellingPriceRupees: 0, purchaseRateRupees: 0,
+        shelfLifeDays: 0, safetyStockQty: 0, maxStockLevel: 0,
         reorderLevelQty: 0, reorderQty: 0, leadTimeDays: 0, minOrderQty: 1,
+        isQcRequired: false,
       });
     }
     setDrawer(true);
   };
 
+  const handleFinishFailed = (errorInfo: any) => {
+    if (errorInfo?.errorFields?.length > 0) {
+      const firstError = errorInfo.errorFields[0];
+      const fieldName = String(firstError.name[0]);
+      const meta = FIELD_META[fieldName];
+      if (meta) {
+        setActiveTab(meta.tabKey);
+        message.error(`Please fill required field '${meta.label}' in the [${meta.tabLabel}] tab.`);
+      } else {
+        message.error(`Please fill required fields: ${firstError.errors.join(', ')}`);
+      }
+    }
+  };
+
   const save = async (values: any) => {
     if (!company?.id) return;
     setSaving(true);
-    const { standardCostRupees, ...rest } = values;
-    const body: any = { ...rest, standardCostPaise: Math.round((standardCostRupees ?? 0) * 100) };
+    const { standardCostRupees, sellingPriceRupees, minSellingPriceRupees, purchaseRateRupees, ...rest } = values;
+    const body: any = {
+      ...rest,
+      standardCostPaise: Math.round((standardCostRupees ?? 0) * 100),
+      sellingPricePaise: Math.round((sellingPriceRupees ?? 0) * 100),
+      minSellingPricePaise: Math.round((minSellingPriceRupees ?? 0) * 100),
+      purchaseRatePaise: Math.round((purchaseRateRupees ?? 0) * 100),
+    };
     if (body.itemType === 'service') body.isStockItem = false;
     try {
       if (editing) {
@@ -91,7 +153,23 @@ export function ItemsPage() {
       setDrawer(false);
       loadItems({ q: q || undefined, itemType: typeFilter });
     } catch (e: any) {
-      message.error(e?.response?.data?.error ?? 'Save failed');
+      const data = e?.response?.data;
+      if (data?.issues && data.issues.length > 0) {
+        const firstIssueField = String(data.issues[0]?.path?.[0]);
+        const meta = FIELD_META[firstIssueField];
+        if (meta) {
+          setActiveTab(meta.tabKey);
+        }
+        const msg = data.issues.map((i: any) => {
+          const field = i.path[0];
+          const itemMeta = FIELD_META[field];
+          const tabPrefix = itemMeta ? `[${itemMeta.tabLabel} tab] ` : '';
+          return `${tabPrefix}${itemMeta?.label || i.path.join('.')}: ${i.message}`.trim();
+        }).join(', ');
+        message.error(`Validation failed: ${msg}`, 5);
+      } else {
+        message.error(data?.error ?? 'Save failed');
+      }
     } finally {
       setSaving(false);
     }
@@ -132,9 +210,23 @@ export function ItemsPage() {
         : <Tag style={{ borderRadius: 10, border: 0, fontSize: 11 }}>{v}</Tag>,
     },
     {
+      title: 'Last Purch (LPP)',
+      dataIndex: 'purchaseRatePaise',
+      key: 'purchaseRate',
+      align: 'right' as const,
+      render: (v: number) => v > 0 ? <Text style={{ fontSize: 12, fontWeight: 500 }}>₹{rupees(v)}</Text> : <Text type="secondary">—</Text>,
+    },
+    {
       title: 'Std Cost',
       dataIndex: 'standardCostPaise',
       key: 'cost',
+      align: 'right' as const,
+      render: (v: number) => v > 0 ? <Text style={{ fontSize: 12 }}>₹{rupees(v)}</Text> : <Text type="secondary">—</Text>,
+    },
+    {
+      title: 'Min Floor',
+      dataIndex: 'minSellingPricePaise',
+      key: 'minFloor',
       align: 'right' as const,
       render: (v: number) => v > 0 ? <Text style={{ fontSize: 12 }}>₹{rupees(v)}</Text> : <Text type="secondary">—</Text>,
     },
@@ -206,9 +298,10 @@ export function ItemsPage() {
         width={560}
         extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>Save</Button>}
       >
-        <Form form={form} layout="vertical" onFinish={save} requiredMark={false}>
+        <Form form={form} layout="vertical" onFinish={save} onFinishFailed={handleFinishFailed} requiredMark={false}>
           <Tabs
-            defaultActiveKey="general"
+            activeKey={activeTab}
+            onChange={setActiveTab}
             items={[
               {
                 key: 'general',
@@ -241,6 +334,13 @@ export function ItemsPage() {
                         </Form.Item>
                       </Col>
                     </Row>
+                    <Row gutter={16}>
+                      <Col span={12}>
+                        <Form.Item name="barcode" label="Barcode / EAN / UPC">
+                          <Input placeholder="e.g. 8901234567890" style={{ fontFamily: 'monospace' }} />
+                        </Form.Item>
+                      </Col>
+                    </Row>
                   </>
                 ),
               },
@@ -261,27 +361,57 @@ export function ItemsPage() {
                         </Form.Item>
                       </Col>
                     </Row>
-                    <Form.Item name="conversionFactor" label="Conversion Factor" extra="1 secondary UOM = N primary UOM units">
-                      <InputNumber min={0} step={0.0001} style={{ width: 220 }} />
-                    </Form.Item>
                     <Row gutter={16}>
                       <Col span={12}>
+                        <Form.Item name="conversionFactor" label="Conversion Factor" extra="1 secondary UOM = N primary UOM units">
+                          <InputNumber min={0} step={0.0001} style={{ width: '100%' }} />
+                        </Form.Item>
+                      </Col>
+                      <Col span={12}>
+                        <Form.Item name="shelfLifeDays" label="Shelf Life (Days)" extra="Auto-calculates batch expiry date on receipt">
+                          <InputNumber min={0} style={{ width: '100%' }} />
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                    <Row gutter={16}>
+                      <Col span={12}>
+                        <Form.Item name="grossWeight" label="Gross Weight per Unit">
+                          <InputNumber min={0} step={0.001} style={{ width: '100%' }} />
+                        </Form.Item>
+                      </Col>
+                      <Col span={12}>
+                        <Form.Item name="weightUom" label="Weight UOM">
+                          <Select allowClear showSearch optionFilterProp="label" options={uomOptions} placeholder="e.g. KG, G" />
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                    <Row gutter={16}>
+                      <Col span={8}>
                         <Form.Item name="isStockItem" label="Maintain Stock" valuePropName="checked" extra={isService ? 'Services are non-stock' : undefined}>
                           <Switch disabled={isService} />
                         </Form.Item>
                       </Col>
-                      <Col span={12}>
+                      <Col span={8}>
                         <Form.Item name="trackingType" label="Tracking">
                           <Select options={TRACKING_TYPES} disabled={isService} />
                         </Form.Item>
                       </Col>
+                      <Col span={8}>
+                        <Form.Item name="isQcRequired" label="QC Required" valuePropName="checked" extra="Mandates inspection before stock release">
+                          <Switch disabled={isService} />
+                        </Form.Item>
+                      </Col>
                     </Row>
                     <Row gutter={16}>
-                      <Col span={8}><Form.Item name="reorderLevelQty" label="Reorder Level"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
-                      <Col span={8}><Form.Item name="reorderQty" label="Reorder Qty"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
-                      <Col span={8}><Form.Item name="leadTimeDays" label="Lead Time (days)"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
+                      <Col span={6}><Form.Item name="safetyStockQty" label="Safety Stock"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
+                      <Col span={6}><Form.Item name="reorderLevelQty" label="Reorder Level"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
+                      <Col span={6}><Form.Item name="reorderQty" label="Reorder Qty"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
+                      <Col span={6}><Form.Item name="maxStockLevel" label="Max Stock Level"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
                     </Row>
-                    <Form.Item name="minOrderQty" label="Minimum Order Qty"><InputNumber min={0} style={{ width: 220 }} /></Form.Item>
+                    <Row gutter={16}>
+                      <Col span={12}><Form.Item name="leadTimeDays" label="Lead Time (days)"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
+                      <Col span={12}><Form.Item name="minOrderQty" label="Minimum Order Qty"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
+                    </Row>
                   </>
                 ),
               },
@@ -292,6 +422,30 @@ export function ItemsPage() {
                   <>
                     <Row gutter={16}>
                       <Col span={12}>
+                        <Form.Item name="sellingPriceRupees" label="Selling Price (₹)" extra="Default rate populated on SO / Quotation">
+                          <InputNumber min={0} step={0.01} style={{ width: '100%' }} />
+                        </Form.Item>
+                      </Col>
+                      <Col span={12}>
+                        <Form.Item name="minSellingPriceRupees" label="Min Selling Price Floor (₹)" extra="Minimum allowable price after discounts">
+                          <InputNumber min={0} step={0.01} style={{ width: '100%' }} />
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                    <Row gutter={16}>
+                      <Col span={12}>
+                        <Form.Item name="purchaseRateRupees" label="Standard Purchase Rate (₹)" extra="Default rate populated on PO / Requisition">
+                          <InputNumber min={0} step={0.01} style={{ width: '100%' }} />
+                        </Form.Item>
+                      </Col>
+                      <Col span={12}>
+                        <Form.Item name="standardCostRupees" label="Standard Cost (₹ per unit)" extra="Used for manufacturing cost roll-up & variance">
+                          <InputNumber min={0} step={0.01} style={{ width: '100%' }} />
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                    <Row gutter={16}>
+                      <Col span={12}>
                         <Form.Item name="valuationMethod" label="Valuation Method">
                           <Select options={[
                             { value: 'weighted_average', label: 'Weighted Average' },
@@ -300,8 +454,9 @@ export function ItemsPage() {
                         </Form.Item>
                       </Col>
                       <Col span={12}>
-                        <Form.Item name="standardCostRupees" label="Standard Cost (₹ per unit)">
-                          <InputNumber min={0} step={0.01} style={{ width: '100%' }} />
+                        <Form.Item name="defaultTaxCodeId" label="Default Tax Code">
+                          <Select allowClear showSearch optionFilterProp="label"
+                            options={taxCodes.map((t) => ({ value: t.id, label: `${t.code} (${(t.gstRateBp / 100)}%)` }))} />
                         </Form.Item>
                       </Col>
                     </Row>
@@ -309,12 +464,6 @@ export function ItemsPage() {
                       <Col span={12}>
                         <Form.Item name="hsnSacCode" label="HSN / SAC Code">
                           <Input placeholder="e.g. 7208" style={{ fontFamily: 'monospace' }} />
-                        </Form.Item>
-                      </Col>
-                      <Col span={12}>
-                        <Form.Item name="defaultTaxCodeId" label="Default Tax Code">
-                          <Select allowClear showSearch optionFilterProp="label"
-                            options={taxCodes.map((t) => ({ value: t.id, label: `${t.code} (${(t.gstRateBp / 100)}%)` }))} />
                         </Form.Item>
                       </Col>
                     </Row>

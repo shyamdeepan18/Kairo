@@ -38,6 +38,8 @@ export const inventoryApi = {
       api.post(`${BASE}/transfers/${id}/submit`, {}).then((r) => r.data),
     approve: (id: string, _companyId: string) =>
       api.post(`${BASE}/transfers/${id}/approve`, {}).then((r) => r.data),
+    receive: (id: string, _companyId: string) =>
+      api.post(`${BASE}/transfers/${id}/receive`, {}).then((r) => r.data),
     reject:  (id: string, _companyId: string) =>
       api.post(`${BASE}/transfers/${id}/reject`, {}).then((r) => r.data),
   },

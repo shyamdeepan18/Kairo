@@ -31,7 +31,7 @@ export class NumberSeriesService {
    * @param opts.fiscalYear Override fiscal year (e.g. '2425'). Defaults to current FY.
    */
   async next(
-    tx: DB,
+    tx: any,
     companyId: string,
     documentType: string,
     opts?: { plantId?: string; plantCode?: string; fiscalYear?: string }
@@ -78,7 +78,7 @@ export class NumberSeriesService {
         s.fiscal_year
     `);
 
-    const rows = result as Array<{
+    const rows = result as unknown as Array<{
       prefix: string;
       current_number: number;
       padding: number;
@@ -88,6 +88,59 @@ export class NumberSeriesService {
     }>;
 
     if (!rows || rows.length === 0) {
+      // Auto-provision a default series for this document type if missing
+      const defaultPrefixes: Record<string, string> = {
+        'purchase.requisition': 'PR',
+        'purchase.po': 'PO',
+        'purchase.grn': 'GRN',
+        'purchase.invoice': 'PINV',
+        'purchase.payment': 'PPAY',
+        'sales.quotation': 'QTN',
+        'sales.so': 'SO',
+        'sales.delivery': 'DN',
+        'sales.invoice': 'SINV',
+        'sales.receipt': 'RCPT',
+        'sales.payment': 'RCPT',
+        'inventory.adjustment': 'SADJ',
+        'inventory.transfer': 'STR',
+        'manufacturing.bom': 'BOM',
+        'manufacturing.order': 'MO',
+        'accounting.jv': 'JV',
+      };
+      const prefix = defaultPrefixes[documentType] || documentType.split('.').pop()?.toUpperCase() || 'DOC';
+
+      await tx.insert(documentNumberSeries).values({
+        companyId,
+        plantId: null,
+        documentType,
+        prefix,
+        fiscalYear,
+        includeFiscalYear: true,
+        includePlantCode: false,
+        padding: 4,
+        currentNumber: 1,
+        resetOnNewYear: true,
+        isActive: true,
+      }).onConflictDoNothing();
+
+      const retryResult = await tx.execute(sql`
+        SELECT prefix, current_number, padding, include_fiscal_year, include_plant_code, fiscal_year
+        FROM document_number_series
+        WHERE company_id = ${companyId} AND document_type = ${documentType}
+        LIMIT 1
+      `);
+      const retryRows = retryResult as unknown as Array<{
+        prefix: string;
+        current_number: number;
+        padding: number;
+        include_fiscal_year: boolean;
+        include_plant_code: boolean;
+        fiscal_year: string | null;
+      }>;
+      if (retryRows && retryRows.length > 0) {
+        return this.format(retryRows[0], opts?.plantCode);
+      }
+
       throw new Error(
         `No active number series found for documentType="${documentType}" ` +
         `companyId="${companyId}" fiscalYear="${fiscalYear}". ` +

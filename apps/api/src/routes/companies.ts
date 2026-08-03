@@ -139,8 +139,8 @@ export default async function companyRoutes(app: FastifyInstance) {
             documentType: s.documentType,
             fiscalYear,
             prefix: s.prefix,
-            paddingDigits: 5,
-            currentSequence: 0,
+            padding: 4,
+            currentNumber: 1,
             isActive: true,
           })
           .onConflictDoNothing();

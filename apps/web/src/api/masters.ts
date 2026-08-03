@@ -8,6 +8,7 @@ import { api } from './client';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type PartyType = 'registered' | 'unregistered' | 'composition' | 'sez' | 'import' | 'export' | 'government';
+export type MsmeType = 'micro' | 'small' | 'medium' | 'none';
 
 export interface Supplier {
   id: string; companyId: string; supplierCode: string; name: string;
@@ -16,6 +17,8 @@ export interface Supplier {
   address: string | null; city: string | null; state: string | null; pincode: string | null;
   contactPerson: string | null; phone: string | null; email: string | null;
   paymentTermsDays: number; creditLimitPaise: number;
+  incoterms: string | null; defaultLeadTimeDays: number;
+  msmeType: MsmeType | null; msmeRegNo: string | null;
   bankAccountName: string | null; bankAccountNumber: string | null;
   bankIfsc: string | null; bankName: string | null;
   isActive: boolean;
@@ -26,7 +29,9 @@ export interface Customer {
   legalName: string | null; customerType: string;
   gstin: string | null; pan: string | null; stateCode: string | null;
   contactPerson: string | null; phone: string | null; email: string | null;
-  paymentTermsDays: number; creditLimitPaise: number; creditHold: boolean;
+  salesPersonId: string | null; customerTier: string | null;
+  shippingTerms: string | null; preferredTransporter: string | null;
+  paymentTermsDays: number; gracePeriodDays: number; creditLimitPaise: number; creditHold: boolean;
   defaultDiscountPercent: string;
   bankAccountName: string | null; bankAccountNumber: string | null;
   bankIfsc: string | null; bankName: string | null;
@@ -49,9 +54,12 @@ export interface Item {
   itemType: string; itemGroupId: string | null;
   primaryUom: string; secondaryUom: string | null; conversionFactor: string | null;
   hsnSacCode: string | null; defaultTaxCodeId: string | null;
+  barcode: string | null;
   isStockItem: boolean; trackingType: string; valuationMethod: string;
-  standardCostPaise: number;
-  reorderLevelQty: string; reorderQty: string; leadTimeDays: number; minOrderQty: string;
+  shelfLifeDays: number; grossWeight: string | null; weightUom: string | null; isQcRequired: boolean;
+  standardCostPaise: number; sellingPricePaise: number; minSellingPricePaise: number; purchaseRatePaise: number;
+  reorderLevelQty: string; reorderQty: string; safetyStockQty: string; maxStockLevel: string;
+  leadTimeDays: number; minOrderQty: string;
   isActive: boolean;
 }
 
@@ -87,6 +95,13 @@ export const SUPPLIER_TYPES: { value: string; label: string }[] = [
   { value: 'government', label: 'Government' },
 ];
 
+export const MSME_TYPES: { value: MsmeType; label: string; color: string }[] = [
+  { value: 'micro', label: 'Micro Enterprise', color: 'blue' },
+  { value: 'small', label: 'Small Enterprise', color: 'green' },
+  { value: 'medium', label: 'Medium Enterprise', color: 'orange' },
+  { value: 'none', label: 'Not Applicable', color: 'default' },
+];
+
 export const CUSTOMER_TYPES: { value: string; label: string }[] = [
   { value: 'registered', label: 'Registered (B2B)' },
   { value: 'unregistered', label: 'Unregistered (B2C)' },
@@ -94,6 +109,22 @@ export const CUSTOMER_TYPES: { value: string; label: string }[] = [
   { value: 'sez', label: 'SEZ' },
   { value: 'export', label: 'Export' },
   { value: 'government', label: 'Government' },
+];
+
+export const CUSTOMER_TIERS = [
+  { value: 'retail', label: 'Retail Customer' },
+  { value: 'wholesale', label: 'Wholesale / Stockist' },
+  { value: 'distributor', label: 'Authorized Distributor' },
+  { value: 'oem', label: 'OEM / Key Account' },
+  { value: 'institutional', label: 'Institutional / Govt' },
+];
+
+export const SHIPPING_TERMS_OPTIONS = [
+  { value: 'EXW', label: 'EXW - Ex Works (Factory Pick-up)' },
+  { value: 'FOB', label: 'FOB - Free on Board' },
+  { value: 'CIF', label: 'CIF - Cost, Insurance & Freight' },
+  { value: 'Door Delivery', label: 'Door Delivery (Transporter Paid)' },
+  { value: 'To-Pay', label: 'Freight To-Pay (Consignee Paid)' },
 ];
 
 export const ITEM_TYPES: { value: ItemType; label: string; color: string }[] = [

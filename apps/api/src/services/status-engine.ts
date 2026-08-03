@@ -11,6 +11,8 @@ export type DocumentStatus =
   | 'draft'
   | 'submitted'
   | 'approved'
+  | 'dispatched'
+  | 'completed'
   | 'rejected'
   | 'closed'
   | 'cancelled';
@@ -18,6 +20,8 @@ export type DocumentStatus =
 export type TransitionAction =
   | 'submit'
   | 'approve'
+  | 'dispatch'
+  | 'receive'
   | 'reject'
   | 'close'
   | 'cancel'
@@ -94,6 +98,36 @@ const TRANSITIONS: Record<string, Partial<Record<DocumentStatus, DocumentStatus[
     rejected:  ['draft'],
     approved:  ['cancelled'],
     cancelled: [],
+  },
+  'sales.receipt': {
+    draft:     ['submitted'],
+    submitted: ['approved', 'rejected'],
+    rejected:  ['draft'],
+    approved:  [],
+    cancelled: [],
+  },
+  'sales.payment': {
+    draft:     ['submitted'],
+    submitted: ['approved', 'rejected'],
+    rejected:  ['draft'],
+    approved:  [],
+    cancelled: [],
+  },
+  'inventory.adjustment': {
+    draft:     ['submitted'],
+    submitted: ['approved', 'rejected'],
+    rejected:  ['draft'],
+    approved:  [],
+    cancelled: [],
+  },
+  'inventory.transfer': {
+    draft:       ['submitted'],
+    submitted:   ['approved', 'dispatched', 'rejected'],
+    dispatched:  ['completed', 'rejected'],
+    rejected:    ['draft'],
+    approved:    [],
+    completed:   [],
+    cancelled:   [],
   },
   'accounting.jv': {
     draft:     ['submitted'],

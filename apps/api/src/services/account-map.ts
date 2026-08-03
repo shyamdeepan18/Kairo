@@ -131,6 +131,11 @@ export class AccountMapService {
       }
     }
 
+    // Default fallbacks for standard posting categories
+    if (!merged['cogs']) {
+      merged['cogs'] = merged['raw_material_consumed'] ?? merged['purchases'];
+    }
+
     return merged;
   }
 }

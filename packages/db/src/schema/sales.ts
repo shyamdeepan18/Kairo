@@ -135,8 +135,18 @@ export const customers = pgTable(
     phone: varchar('phone', { length: 20 }),
     email: varchar('email', { length: 255 }),
 
-    // ── Commercial terms ──────────────────────────────────────────────────
+    // ── Commercial & Sales terms ─────────────────────────────────────────
+    /** Assigned sales account manager / representative */
+    salesPersonId: uuid('sales_person_id').references(() => users.id),
+    /** Customer classification / tier (retail, wholesale, distributor, oem, etc.) */
+    customerTier: varchar('customer_tier', { length: 50 }),
+    /** Trade / shipping terms (FOB, CIF, EXW, Door Delivery) */
+    shippingTerms: varchar('shipping_terms', { length: 50 }),
+    /** Preferred logistics / transport partner */
+    preferredTransporter: varchar('preferred_transporter', { length: 255 }),
     paymentTermsDays: integer('payment_terms_days').default(0).notNull(),
+    /** Grace period in days before overdue credit-hold triggers */
+    gracePeriodDays: integer('grace_period_days').default(0).notNull(),
     /** Credit limit in paise. AR outstanding is checked against this at SO approval. */
     creditLimitPaise: money('credit_limit_paise').default(0).notNull(),
     /** Block new orders when over credit limit */

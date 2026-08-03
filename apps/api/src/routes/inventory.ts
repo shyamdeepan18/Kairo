@@ -48,13 +48,19 @@ const transferLineSchema = z.object({
 });
 
 const transferCreateSchema = z.object({
-  plantId:         z.string().uuid(),
+  plantId:         z.string().uuid().optional(),
+  fromPlantId:     z.string().uuid().optional(),
+  toPlantId:       z.string().uuid().optional(),
   fromWarehouseId: z.string().uuid(),
   toWarehouseId:   z.string().uuid(),
   postingDate:     z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  transferType:    z.enum(['direct', 'in_transit']).default('direct'),
   reason:          z.string().optional(),
   remarks:         z.string().optional(),
   vehicleNo:       z.string().optional(),
+  driverName:      z.string().optional(),
+  driverPhone:     z.string().optional(),
+  lrNumber:        z.string().optional(),
   lines:           z.array(transferLineSchema).min(1),
 }).strict();
 
@@ -262,9 +268,9 @@ export default async function inventoryRoutes(app: FastifyInstance) {
     if (!adj) return reply.code(404).send({ error: 'Not found' });
     if (adj.status !== 'draft') return reply.code(409).send({ error: `Adjustment is '${adj.status}', not draft` });
     try {
-      await app.statusEngine.prepare('inventory.adjustment', adj.status as DocumentStatus, 'submitted', uid);
+      const res = await app.statusEngine.prepare('inventory.adjustment', adj.status as DocumentStatus, 'submitted', uid);
       await db.update(stockAdjustments).set({ status: 'submitted', submittedAt: new Date(), submittedBy: uid, updatedAt: new Date() }).where(eq(stockAdjustments.id, id));
-      await app.auditEngine.logTransition({ companyId: cid, documentType: 'inventory.adjustment', documentId: id, documentNumber: adj.documentNumber, performedBy: uid }, 'draft', { toStatus: 'submitted', stampFields: {}, allowedFrom: ['draft'] });
+      await app.auditEngine.logTransition({ companyId: cid, documentType: 'inventory.adjustment', documentId: id, documentNumber: adj.documentNumber, performedBy: uid }, 'draft', res);
       return reply.send({ ok: true, status: 'submitted' });
     } catch (e) {
       return reply.code(409).send({ error: 'Transition failed', detail: (e as Error).message });
@@ -354,7 +360,7 @@ export default async function inventoryRoutes(app: FastifyInstance) {
   // ══════════════════════════════════════════════════════════════════════════
 
   app.post('/transfers', {
-    preHandler: [app.authenticate, resolveTenantContext, authorize('inventory.transfer.create', { plantFrom: 'body.plantId' })],
+    preHandler: [app.authenticate, resolveTenantContext, authorize('inventory.transfer.create')],
   }, async (request, reply) => {
     const parsed = transferCreateSchema.safeParse(stripServerOwned(request.body));
     if (!parsed.success) return bad(reply, parsed);
@@ -363,33 +369,103 @@ export default async function inventoryRoutes(app: FastifyInstance) {
     const { fiscalYear, period } = fiscalPeriod(new Date(d.postingDate));
     const uid = userId(request);
     const cid = tenant(request).companyId; // trusted; body companyId is ignored
+    const isSysAdmin = (request.user as any)?.isSystemAdmin;
+
+    // Fetch and verify source & destination warehouses
+    const [fromWh] = await db.select().from(warehouses).where(and(eq(warehouses.id, d.fromWarehouseId), eq(warehouses.companyId, cid))).limit(1);
+    const [toWh] = await db.select().from(warehouses).where(and(eq(warehouses.id, d.toWarehouseId), eq(warehouses.companyId, cid))).limit(1);
+    if (!fromWh) return reply.code(400).send({ error: 'Source warehouse not found' });
+    if (!toWh) return reply.code(400).send({ error: 'Destination warehouse not found' });
+
+    const fromPlantId = d.fromPlantId ?? fromWh.plantId;
+    const toPlantId = d.toPlantId ?? toWh.plantId;
+    const plantId = fromPlantId;
+
     await Promise.all([
-      assertOwned(plants, d.plantId, cid, 'Plant'),
-      assertOwned(warehouses, d.fromWarehouseId, cid, 'Source warehouse'),
-      assertOwned(warehouses, d.toWarehouseId, cid, 'Destination warehouse'),
+      assertOwned(plants, fromPlantId, cid, 'Source plant'),
+      assertOwned(plants, toPlantId, cid, 'Destination plant'),
       assertAllOwned(items, d.lines.map((l) => l.itemId), cid, 'Item'),
     ]);
 
+    // Check operational access to source plant if not system admin
+    if (!isSysAdmin) {
+      const hasPlant = await app.permissionService.hasPlantAccess(uid, fromPlantId);
+      if (!hasPlant) {
+        return reply.code(403).send({ error: 'Forbidden: No access to source plant' });
+      }
+    }
+
     const created = await db.transaction(async (tx) => {
-      const docNumber = await app.numberSeriesService.next(tx, cid, 'inventory.transfer', { fiscalYear, plantId: d.plantId });
-      const totalPaise = d.lines.reduce((s, l) => s + Math.round((l.valuationRatePaise ?? 0) * l.quantity), 0);
+      const docNumber = await app.numberSeriesService.next(tx, cid, 'inventory.transfer', { fiscalYear, plantId });
+      
+      // Auto-populate valuation rate from stock_balances if not provided
+      const resolvedLines = await Promise.all(
+        d.lines.map(async (l) => {
+          let ratePaise = l.valuationRatePaise;
+          if (ratePaise === undefined || ratePaise === null || ratePaise === 0) {
+            const [sb] = await tx
+              .select({ valuationRatePaise: stockBalances.valuationRatePaise })
+              .from(stockBalances)
+              .where(and(
+                eq(stockBalances.companyId, cid),
+                eq(stockBalances.warehouseId, d.fromWarehouseId),
+                eq(stockBalances.itemId, l.itemId)
+              ))
+              .limit(1);
+            if (sb && sb.valuationRatePaise > 0) {
+              ratePaise = sb.valuationRatePaise;
+            } else {
+              const [it] = await tx
+                .select({ purchaseRatePaise: items.purchaseRatePaise })
+                .from(items)
+                .where(eq(items.id, l.itemId))
+                .limit(1);
+              ratePaise = it?.purchaseRatePaise ?? 0;
+            }
+          }
+          return {
+            ...l,
+            valuationRatePaise: ratePaise ?? 0,
+            valuationAmountPaise: Math.round((ratePaise ?? 0) * l.quantity),
+          };
+        })
+      );
+
+      const totalPaise = resolvedLines.reduce((s, l) => s + l.valuationAmountPaise, 0);
 
       const [tr] = await tx.insert(stockTransfers).values({
-        companyId: cid, plantId: d.plantId,
-        documentNumber: docNumber, postingDate: d.postingDate as any,
-        fiscalYear, period,
-        fromWarehouseId: d.fromWarehouseId, toWarehouseId: d.toWarehouseId,
-        reason: d.reason, remarks: d.remarks, vehicleNo: d.vehicleNo,
-        status: 'draft', totalAmountPaise: totalPaise, createdBy: uid,
+        companyId: cid,
+        plantId,
+        fromPlantId,
+        toPlantId,
+        documentNumber: docNumber,
+        postingDate: d.postingDate as any,
+        fiscalYear,
+        period,
+        transferType: d.transferType,
+        fromWarehouseId: d.fromWarehouseId,
+        toWarehouseId: d.toWarehouseId,
+        reason: d.reason,
+        remarks: d.remarks,
+        vehicleNo: d.vehicleNo,
+        driverName: d.driverName,
+        driverPhone: d.driverPhone,
+        lrNumber: d.lrNumber,
+        status: 'draft',
+        totalAmountPaise: totalPaise,
+        createdBy: uid,
       }).returning();
 
       await tx.insert(stockTransferLines).values(
-        d.lines.map((l, i) => ({
-          transferId: tr.id, lineNumber: i + 1,
-          itemId: l.itemId, description: l.description,
-          quantity: l.quantity.toString(), uom: l.uom,
-          valuationRatePaise: l.valuationRatePaise ?? 0,
-          valuationAmountPaise: Math.round((l.valuationRatePaise ?? 0) * l.quantity),
+        resolvedLines.map((l, i) => ({
+          transferId: tr.id,
+          lineNumber: i + 1,
+          itemId: l.itemId,
+          description: l.description,
+          quantity: l.quantity.toString(),
+          uom: l.uom,
+          valuationRatePaise: l.valuationRatePaise,
+          valuationAmountPaise: l.valuationAmountPaise,
         }))
       );
       return tr;
@@ -405,6 +481,9 @@ export default async function inventoryRoutes(app: FastifyInstance) {
     const { page, pageSize, limit, offset } = paginate(q);
     const filters = [eq(stockTransfers.companyId, cid)];
     if (q.status) filters.push(eq(stockTransfers.status, String(q.status)));
+    if (q.fromPlantId) filters.push(eq(stockTransfers.fromPlantId, String(q.fromPlantId)));
+    if (q.toPlantId) filters.push(eq(stockTransfers.toPlantId, String(q.toPlantId)));
+
     const data = await db.select().from(stockTransfers).where(and(...filters))
       .orderBy(desc(stockTransfers.createdAt)).limit(limit).offset(offset);
     const [{ count }] = await db.select({ count: sql<number>`count(*)::int` }).from(stockTransfers).where(and(...filters));
@@ -438,52 +517,172 @@ export default async function inventoryRoutes(app: FastifyInstance) {
     return reply.send({ ok: true, status: 'submitted' });
   });
 
-  // Approve → post stock (issue from source + receipt to destination)
+  // Approve → post stock
+  // Direct: posts OUT from source WH and IN to dest WH -> status 'approved'
+  // In-Transit: posts OUT from source WH -> status 'dispatched'
   app.post('/transfers/:id/approve', {
     preHandler: [app.authenticate, resolveTenantContext, authorize('inventory.transfer.approve')],
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const uid = userId(request);
     const cid = tenant(request).companyId;
-    // Scope to the caller's company so a foreign transfer can't be posted here.
+    const isSysAdmin = (request.user as any)?.isSystemAdmin;
+
     const [tr] = await db.select().from(stockTransfers)
       .where(byTenantId(stockTransfers, id, cid)).limit(1);
     if (!tr) return reply.code(404).send({ error: 'Not found' });
     if (tr.status !== 'submitted') return reply.code(409).send({ error: `Transfer must be submitted (is '${tr.status}')` });
+
+    // Segregation of Duties (Maker-Checker)
+    const bypassSod = await app.permissionService.check(uid, 'system.bypass_sod', cid);
+    if (!app.permissionService.validateMakerChecker(uid, tr.createdBy, tr.submittedBy, bypassSod)) {
+      return reply.code(403).send({ error: 'Segregation of Duties: Creator/Submitter cannot approve their own transfer' });
+    }
+
+    // Approval Limit Check
+    const withinLimit = await app.permissionService.withinApprovalLimit(
+      uid, cid, 'inventory.transfer', tr.totalAmountPaise, tr.fromPlantId ?? tr.plantId
+    );
+    if (!withinLimit) {
+      return reply.code(403).send({ error: 'Transfer amount exceeds user approval threshold' });
+    }
+
+    // Source plant access check
+    if (!isSysAdmin) {
+      const hasPlant = await app.permissionService.hasPlantAccess(uid, tr.fromPlantId ?? tr.plantId);
+      if (!hasPlant) return reply.code(403).send({ error: 'Forbidden: No approval access to source plant' });
+    }
+
     const lines = await db.select().from(stockTransferLines).where(eq(stockTransferLines.transferId, id));
 
     try {
       await db.transaction(async (tx) => {
         const postingDate = new Date(tr.postingDate);
-        // Issue from source warehouse (OUT)
+        const fromPlantId = tr.fromPlantId ?? tr.plantId;
+        const toPlantId = tr.toPlantId ?? tr.plantId;
+
+        // 1. Issue from source warehouse (OUT)
         await app.stockLedger.postBatch(tx, lines.map((l) => ({
-          companyId: cid, plantId: tr.plantId, warehouseId: tr.fromWarehouseId,
-          itemId: l.itemId, movementType: 'transfer_issue' as const,
-          quantity: parseFloat(l.quantity), uom: l.uom,
+          companyId: cid,
+          plantId: fromPlantId,
+          warehouseId: tr.fromWarehouseId,
+          itemId: l.itemId,
+          movementType: 'transfer_issue' as const,
+          quantity: parseFloat(l.quantity),
+          uom: l.uom,
           valuationRatePaise: l.valuationRatePaise,
-          documentType: 'inventory.transfer', documentId: tr.id,
-          documentNumber: tr.documentNumber, documentLineNumber: l.lineNumber,
-          postingDate, createdBy: uid,
+          documentType: 'inventory.transfer',
+          documentId: tr.id,
+          documentNumber: tr.documentNumber,
+          documentLineNumber: l.lineNumber,
+          postingDate,
+          createdBy: uid,
         })));
-        // Receipt at destination warehouse (IN)
-        await app.stockLedger.postBatch(tx, lines.map((l) => ({
-          companyId: cid, plantId: tr.plantId, warehouseId: tr.toWarehouseId,
-          itemId: l.itemId, movementType: 'transfer_receipt' as const,
-          quantity: parseFloat(l.quantity), uom: l.uom,
-          valuationRatePaise: l.valuationRatePaise,
-          documentType: 'inventory.transfer', documentId: tr.id,
-          documentNumber: tr.documentNumber, documentLineNumber: l.lineNumber,
-          postingDate, createdBy: uid,
-        })));
-        // Status → approved
-        await tx.update(stockTransfers)
-          .set({ status: 'approved', approvedAt: new Date(), approvedBy: uid, updatedAt: new Date() })
-          .where(eq(stockTransfers.id, id));
+
+        if (tr.transferType === 'in_transit') {
+          // 2-Step In-Transit: stock is in transit until destination plant receives it
+          await tx.update(stockTransfers)
+            .set({
+              status: 'dispatched',
+              approvedAt: new Date(),
+              approvedBy: uid,
+              dispatchedAt: new Date(),
+              dispatchedBy: uid,
+              updatedAt: new Date(),
+            })
+            .where(eq(stockTransfers.id, id));
+        } else {
+          // 1-Step Direct: Receipt immediately at destination warehouse (IN)
+          await app.stockLedger.postBatch(tx, lines.map((l) => ({
+            companyId: cid,
+            plantId: toPlantId,
+            warehouseId: tr.toWarehouseId,
+            itemId: l.itemId,
+            movementType: 'transfer_receipt' as const,
+            quantity: parseFloat(l.quantity),
+            uom: l.uom,
+            valuationRatePaise: l.valuationRatePaise,
+            documentType: 'inventory.transfer',
+            documentId: tr.id,
+            documentNumber: tr.documentNumber,
+            documentLineNumber: l.lineNumber,
+            postingDate,
+            createdBy: uid,
+          })));
+
+          await tx.update(stockTransfers)
+            .set({
+              status: 'approved',
+              approvedAt: new Date(),
+              approvedBy: uid,
+              updatedAt: new Date(),
+            })
+            .where(eq(stockTransfers.id, id));
+        }
       });
-      return reply.send({ ok: true, status: 'approved' });
+      return reply.send({ ok: true, status: tr.transferType === 'in_transit' ? 'dispatched' : 'approved' });
     } catch (e) {
       request.log.error(e);
       return reply.code(409).send({ error: 'Approval failed', detail: (e as Error).message });
+    }
+  });
+
+  // Receive Inward (for In-Transit 2-step transfers)
+  app.post('/transfers/:id/receive', {
+    preHandler: [app.authenticate, resolveTenantContext, authorize('inventory.transfer.approve')],
+  }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const uid = userId(request);
+    const cid = tenant(request).companyId;
+    const isSysAdmin = (request.user as any)?.isSystemAdmin;
+
+    const [tr] = await db.select().from(stockTransfers)
+      .where(byTenantId(stockTransfers, id, cid)).limit(1);
+    if (!tr) return reply.code(404).send({ error: 'Not found' });
+    if (tr.status !== 'dispatched') return reply.code(409).send({ error: `Transfer must be dispatched to receive inward (is '${tr.status}')` });
+
+    const toPlantId = tr.toPlantId ?? tr.plantId;
+    if (!isSysAdmin) {
+      const hasDestPlant = await app.permissionService.hasPlantAccess(uid, toPlantId);
+      if (!hasDestPlant) return reply.code(403).send({ error: 'Forbidden: No operational access to destination plant' });
+    }
+
+    const lines = await db.select().from(stockTransferLines).where(eq(stockTransferLines.transferId, id));
+
+    try {
+      await db.transaction(async (tx) => {
+        const postingDate = new Date();
+        // Receipt at destination warehouse (IN)
+        await app.stockLedger.postBatch(tx, lines.map((l) => ({
+          companyId: cid,
+          plantId: toPlantId,
+          warehouseId: tr.toWarehouseId,
+          itemId: l.itemId,
+          movementType: 'transfer_receipt' as const,
+          quantity: parseFloat(l.quantity),
+          uom: l.uom,
+          valuationRatePaise: l.valuationRatePaise,
+          documentType: 'inventory.transfer',
+          documentId: tr.id,
+          documentNumber: tr.documentNumber,
+          documentLineNumber: l.lineNumber,
+          postingDate,
+          createdBy: uid,
+        })));
+
+        await tx.update(stockTransfers)
+          .set({
+            status: 'completed',
+            receivedAt: new Date(),
+            receivedBy: uid,
+            updatedAt: new Date(),
+          })
+          .where(eq(stockTransfers.id, id));
+      });
+      return reply.send({ ok: true, status: 'completed' });
+    } catch (e) {
+      request.log.error(e);
+      return reply.code(409).send({ error: 'Receipt failed', detail: (e as Error).message });
     }
   });
 
@@ -497,6 +696,9 @@ export default async function inventoryRoutes(app: FastifyInstance) {
     const [tr] = await db.select().from(stockTransfers)
       .where(byTenantId(stockTransfers, id, cid)).limit(1);
     if (!tr) return reply.code(404).send({ error: 'Not found' });
+    if (tr.status !== 'submitted' && tr.status !== 'draft') {
+      return reply.code(409).send({ error: `Cannot reject transfer in '${tr.status}' state` });
+    }
     await db.update(stockTransfers).set({ status: 'rejected', rejectedAt: new Date(), rejectedBy: uid, updatedAt: new Date() }).where(byTenantId(stockTransfers, id, cid));
     return reply.send({ ok: true, status: 'rejected' });
   });

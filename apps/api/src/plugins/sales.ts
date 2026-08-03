@@ -35,8 +35,14 @@ export const salesDeliveryTemplate: PostingTemplateFn = (ctx, accountMap): RawJo
     ? ('inventory_finished' as const)
     : ('inventory_raw_material' as const);
 
+  const cogsCategory = accountMap.has('cogs')
+    ? ('cogs' as const)
+    : accountMap.has('raw_material_consumed')
+    ? ('raw_material_consumed' as const)
+    : ('purchases' as const);
+
   return [
-    { accountCategory: 'cogs', debitPaise: totalCogs, creditPaise: 0, narration: `COGS: ${ctx.documentNumber}` },
+    { accountCategory: cogsCategory, debitPaise: totalCogs, creditPaise: 0, narration: `COGS: ${ctx.documentNumber}` },
     { accountCategory: inventoryCategory, debitPaise: 0, creditPaise: totalCogs },
   ];
 };

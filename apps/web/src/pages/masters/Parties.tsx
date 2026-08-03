@@ -7,7 +7,7 @@ import {
 } from 'antd';
 import { PlusOutlined, EditOutlined, SearchOutlined } from '@ant-design/icons';
 import {
-  mastersApi, SUPPLIER_TYPES, CUSTOMER_TYPES,
+  mastersApi, SUPPLIER_TYPES, CUSTOMER_TYPES, MSME_TYPES, CUSTOMER_TIERS, SHIPPING_TERMS_OPTIONS,
   type Supplier, type Customer,
 } from '../../api/masters';
 import { usePlantStore } from '../../store/plant';
@@ -72,6 +72,9 @@ function PartyPage({ kind }: PartyPageProps) {
       form.setFieldsValue({
         [`${kind}Type`]: 'registered',
         paymentTermsDays: 30,
+        gracePeriodDays: 0,
+        defaultLeadTimeDays: 0,
+        msmeType: 'none',
         creditLimitRupees: 0,
       });
     }
@@ -104,8 +107,6 @@ function PartyPage({ kind }: PartyPageProps) {
     }
   };
 
-
-
   const codeField = isSupplier ? 'supplierCode' : 'customerCode';
   const typeField = `${kind}Type`;
 
@@ -125,7 +126,17 @@ function PartyPage({ kind }: PartyPageProps) {
       key: 'type',
       render: (_: unknown, r: Party) => {
         const t = types.find((x) => x.value === (r as any)[typeField]);
-        return <Tag style={{ borderRadius: 10, border: 0, fontSize: 11 }}>{t?.label ?? (r as any)[typeField]}</Tag>;
+        return (
+          <div className="flex flex-col gap-1 items-start">
+            <Tag style={{ borderRadius: 10, border: 0, fontSize: 11 }}>{t?.label ?? (r as any)[typeField]}</Tag>
+            {isSupplier && r.msmeType && r.msmeType !== 'none' && (
+              <Tag color="cyan" style={{ borderRadius: 10, border: 0, fontSize: 10 }}>MSME: {r.msmeType.toUpperCase()}</Tag>
+            )}
+            {!isSupplier && r.customerTier && (
+              <Tag color="purple" style={{ borderRadius: 10, border: 0, fontSize: 10 }}>{r.customerTier.toUpperCase()}</Tag>
+            )}
+          </div>
+        );
       },
     },
     {
@@ -197,7 +208,7 @@ function PartyPage({ kind }: PartyPageProps) {
         title={editing ? `Edit ${noun}` : `Add ${noun}`}
         open={drawer}
         onClose={async () => { if (await confirmClose(form)) { form.resetFields(); setDrawer(false); } }}
-        width={520}
+        width={540}
         extra={<Button type="primary" loading={saving} onClick={() => form.submit()}>Save</Button>}
       >
         <Form form={form} layout="vertical" onFinish={save} requiredMark={false}>
@@ -256,6 +267,18 @@ function PartyPage({ kind }: PartyPageProps) {
                     </Form.Item>
                     {isSupplier && (
                       <>
+                        <Row gutter={16}>
+                          <Col span={12}>
+                            <Form.Item name="msmeType" label="MSME Classification">
+                              <Select options={MSME_TYPES} placeholder="Select MSME category" />
+                            </Form.Item>
+                          </Col>
+                          <Col span={12}>
+                            <Form.Item name="msmeRegNo" label="MSME / Udyam Reg No">
+                              <Input placeholder="UDYAM-XX-00-0000000" style={{ fontFamily: 'monospace' }} />
+                            </Form.Item>
+                          </Col>
+                        </Row>
                         <Form.Item name="address" label="Address"><Input.TextArea rows={2} /></Form.Item>
                         <Row gutter={16}>
                           <Col span={12}><Form.Item name="city" label="City"><Input /></Form.Item></Col>
@@ -284,19 +307,58 @@ function PartyPage({ kind }: PartyPageProps) {
                         </Form.Item>
                       </Col>
                     </Row>
-                    {!isSupplier && (
+                    {isSupplier ? (
                       <Row gutter={16}>
                         <Col span={12}>
-                          <Form.Item name="defaultDiscountPercent" label="Default Discount (%)">
-                            <InputNumber min={0} max={100} step={0.5} style={{ width: '100%' }} />
+                          <Form.Item name="incoterms" label="Standard Incoterms">
+                            <Input placeholder="e.g. FOB, CIF, EXW" />
                           </Form.Item>
                         </Col>
                         <Col span={12}>
-                          <Form.Item name="creditHold" label="Credit Hold" valuePropName="checked" extra="Block new orders">
-                            <Switch />
+                          <Form.Item name="defaultLeadTimeDays" label="Default Lead Time (days)">
+                            <InputNumber min={0} style={{ width: '100%' }} />
                           </Form.Item>
                         </Col>
                       </Row>
+                    ) : (
+                      <>
+                        <Row gutter={16}>
+                          <Col span={12}>
+                            <Form.Item name="customerTier" label="Customer Tier">
+                              <Select allowClear options={CUSTOMER_TIERS} placeholder="Select tier" />
+                            </Form.Item>
+                          </Col>
+                          <Col span={12}>
+                            <Form.Item name="defaultDiscountPercent" label="Default Discount (%)">
+                              <InputNumber min={0} max={100} step={0.5} style={{ width: '100%' }} />
+                            </Form.Item>
+                          </Col>
+                        </Row>
+                        <Row gutter={16}>
+                          <Col span={12}>
+                            <Form.Item name="gracePeriodDays" label="Grace Period (days)" extra="Days past due date before credit block">
+                              <InputNumber min={0} max={90} style={{ width: '100%' }} />
+                            </Form.Item>
+                          </Col>
+                          <Col span={12}>
+                            <Form.Item name="creditHold" label="Credit Hold" valuePropName="checked" extra="Block new sales orders">
+                              <Switch />
+                            </Form.Item>
+                          </Col>
+                        </Row>
+                        <Row gutter={16}>
+                          <Col span={12}>
+                            <Form.Item name="shippingTerms" label="Shipping Terms">
+                              <Select allowClear options={SHIPPING_TERMS_OPTIONS} placeholder="Select shipping terms" />
+                            </Form.Item>
+                          </Col>
+                          <Col span={12}>
+                            <Form.Item name="preferredTransporter" label="Preferred Transporter">
+                              <Input placeholder="e.g. VRL, TCI Express" />
+                            </Form.Item>
+                          </Col>
+                        </Row>
+                      </>
                     )}
                   </>
                 ),

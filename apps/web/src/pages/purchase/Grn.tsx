@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
-import { Drawer, Form, DatePicker, Input, Select, message } from 'antd';
+import { Drawer, Form, DatePicker, Input, Select, InputNumber, message } from 'antd';
 import dayjs from 'dayjs';
 import { Truck, Plus, Eye, CheckCircle2, Search, Send, FileBox, Building2, Calendar, ClipboardList } from 'lucide-react';
 import { usePlantStore } from '../../store/plant';
@@ -49,7 +49,18 @@ export function GrnPage() {
     purchaseApi.orders.list(company.id, { status: 'approved' }).then((r) => setPos(r.data)).catch(() => {});
   }, [company?.id, plant?.id]);
 
-  const refItems: RefItem[] = items.map((i) => ({ id: i.id, itemName: i.itemName, itemCode: i.itemCode, primaryUom: i.primaryUom, defaultTaxCodeId: i.defaultTaxCodeId }));
+  const refItems: RefItem[] = items.map((i) => ({
+    id: i.id,
+    itemName: i.itemName,
+    itemCode: i.itemCode,
+    primaryUom: i.primaryUom,
+    defaultTaxCodeId: i.defaultTaxCodeId,
+    sellingPricePaise: i.sellingPricePaise,
+    purchaseRatePaise: i.purchaseRatePaise,
+    standardCostPaise: i.standardCostPaise,
+    minSellingPricePaise: i.minSellingPricePaise,
+    barcode: i.barcode,
+  }));
 
   const handlePoChange = async (poId?: string) => {
     if (!poId || !company?.id) return;
@@ -88,7 +99,7 @@ export function GrnPage() {
 
   const openNew = () => { 
     form.resetFields(); 
-    form.setFieldsValue({ postingDate: dayjs(), warehouseId: warehouses[0]?.id }); 
+    form.setFieldsValue({ postingDate: dayjs(), warehouseId: warehouses[0]?.id, landedChargesRupees: 0 }); 
     setLines([newDraftLine()]); 
     setDrawer(true); 
   };
@@ -106,6 +117,7 @@ export function GrnPage() {
       poId: v.poId || undefined, 
       warehouseId: v.warehouseId, 
       supplierDcNo: v.supplierDcNo || undefined,
+      landedChargesPaise: v.landedChargesRupees ? Math.round(Number(v.landedChargesRupees) * 100) : 0,
       lines: valid.map((l) => ({ 
         itemId: l.itemId, 
         description: l.description || undefined, 
@@ -118,7 +130,7 @@ export function GrnPage() {
     };
     try { 
       await purchaseApi.grns.create(body); 
-      message.success('GRN created.'); 
+      message.success('GRN created with Landed Cost Valuation.'); 
       setDrawer(false); 
       load(); 
     } catch (e) { message.error(apiErr(e)); } finally { setSaving(false); }
@@ -267,6 +279,9 @@ export function GrnPage() {
             <Form.Item name="supplierDcNo" label={<span className="font-bold text-slate-700 dark:text-slate-300">Supplier DC No</span>} className="mb-0">
               <Input placeholder="Challan Number" />
             </Form.Item>
+            <Form.Item name="landedChargesRupees" label={<span className="font-bold text-slate-700 dark:text-slate-300">Landed Freight / Duty (₹)</span>} extra="Capitalized proportionally into unit stock valuation & LPP" className="mb-0 col-span-2">
+              <InputNumber min={0} step={0.01} placeholder="0.00" style={{ width: '100%' }} />
+            </Form.Item>
           </div>
 
           <div className="pt-4 border-t border-slate-200">
@@ -292,7 +307,7 @@ export function GrnPage() {
         } 
         open={!!viewing} 
         onClose={() => setViewing(null)} 
-        width={800}
+        width={850}
       >
         {viewing && (
           <div className="space-y-6">
@@ -312,7 +327,7 @@ export function GrnPage() {
             </div>
             
             <div>
-              <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-3 border-b pb-2">Items Received</h3>
+              <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-3 border-b pb-2">Items Received & Cost Valuation</h3>
               <div className="border border-slate-200 dark:border-slate-700/50 rounded-lg overflow-x-auto">
                 <table className="w-full text-sm text-left">
                   <thead className="bg-slate-50 dark:bg-slate-800/80 border-b dark:border-slate-700/50 text-xs text-slate-500 dark:text-slate-400 dark:text-slate-400 uppercase">
@@ -321,6 +336,8 @@ export function GrnPage() {
                       <th className="px-4 py-3 font-bold">Item Description</th>
                       <th className="px-4 py-3 font-bold text-right">Received Qty</th>
                       <th className="px-4 py-3 font-bold">UOM</th>
+                      <th className="px-4 py-3 font-bold text-right">Unit Rate (₹)</th>
+                      <th className="px-4 py-3 font-bold text-right">Valuation Rate (₹)</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
@@ -330,6 +347,8 @@ export function GrnPage() {
                         <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">{l.description || '—'}</td>
                         <td className="px-4 py-3 text-right font-medium text-emerald-700 bg-emerald-50">{l.receivedQty}</td>
                         <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{l.uom}</td>
+                        <td className="px-4 py-3 text-right text-slate-700 dark:text-slate-300">₹{(Number(l.ratePaise || 0) / 100).toFixed(2)}</td>
+                        <td className="px-4 py-3 text-right font-bold text-emerald-600">₹{(Number(l.valuationRatePaise || l.ratePaise || 0) / 100).toFixed(2)}</td>
                       </tr>
                     ))}
                   </tbody>

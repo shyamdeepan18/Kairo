@@ -151,6 +151,16 @@ export const suppliers = pgTable(
     creditLimitPaise: money('credit_limit_paise').default(0).notNull(),
     defaultCurrency: varchar('default_currency', { length: 3 }).default('INR').notNull(),
     grnInvoiceTolerancePct: numeric('grn_invoice_tolerance_pct', { precision: 5, scale: 2 }).default('0').notNull(),
+    /** Trade / freight delivery terms (FOB, CIF, EXW, Door Delivery) */
+    incoterms: varchar('incoterms', { length: 50 }),
+    /** Expected supplier dispatch lead time in days */
+    defaultLeadTimeDays: integer('default_lead_time_days').default(0).notNull(),
+
+    // ── MSME Statutory Compliance (Section 43B(h)) ────────────────────────
+    /** MSME enterprise class: 'micro' | 'small' | 'medium' | 'none' */
+    msmeType: varchar('msme_type', { length: 30 }),
+    /** Udyam / MSME registration number */
+    msmeRegNo: varchar('msme_reg_no', { length: 50 }),
 
     // ── TDS (income-tax withholding) ──────────────────────────────────────
     tdsApplicable: boolean('tds_applicable').default(false).notNull(),

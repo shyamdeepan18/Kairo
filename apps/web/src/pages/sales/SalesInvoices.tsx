@@ -49,7 +49,18 @@ export function SalesInvoicesPage() {
     settingsApi.listTaxCodes(company.id).then(setTaxCodes).catch(() => {});
   }, [company?.id]);
 
-  const refItems: RefItem[] = items.map((i) => ({ id: i.id, itemName: i.itemName, itemCode: i.itemCode, primaryUom: i.primaryUom, defaultTaxCodeId: i.defaultTaxCodeId }));
+  const refItems: RefItem[] = items.map((i) => ({
+    id: i.id,
+    itemName: i.itemName,
+    itemCode: i.itemCode,
+    primaryUom: i.primaryUom,
+    defaultTaxCodeId: i.defaultTaxCodeId,
+    sellingPricePaise: i.sellingPricePaise,
+    purchaseRatePaise: i.purchaseRatePaise,
+    standardCostPaise: i.standardCostPaise,
+    minSellingPricePaise: i.minSellingPricePaise,
+    barcode: i.barcode,
+  }));
 
   const openNew = () => { form.resetFields(); form.setFieldsValue({ postingDate: dayjs() }); setLines([newDraftLine()]); setDrawer(true); };
   
