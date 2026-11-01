@@ -98,6 +98,27 @@ export const manufacturingApi = {
     act: (id: string, action: MfgAction, companyId: string, remarks?: string) => act('orders', id, action, companyId, { remarks }),
     issue: (id: string, companyId: string, body: Record<string, unknown>) => act('orders', id, 'issue', companyId, body),
     receive: (id: string, companyId: string, body: Record<string, unknown>) => act('orders', id, 'receive', companyId, body),
+    completeOperation: (id: string, seq: number, companyId: string, body: { actualMins: number }) =>
+      api.post(`${BASE}/orders/${id}/operations/${seq}/complete`, body).then((r) => r.data),
     close: (id: string, companyId: string, remarks?: string) => act('orders', id, 'close', companyId, { remarks }),
+  },
+
+  subcontracting: {
+    listOrders: (params?: Record<string, unknown>) =>
+      api.get<any[]>('/manufacturing/job-work-orders', { params }).then((r) => r.data),
+    getOrder: (id: string) =>
+      api.get<any>(`/manufacturing/job-work-orders/${id}`).then((r) => r.data),
+    createOrder: (body: Record<string, unknown>) =>
+      api.post<any>('/manufacturing/job-work-orders', body).then((r) => r.data),
+    actOrder: (id: string, action: 'submit' | 'approve' | 'cancel', remarks?: string) =>
+      api.post(`/manufacturing/job-work-orders/${id}/${action}`, { remarks }).then((r) => r.data),
+    listChallans: () =>
+      api.get<any[]>('/manufacturing/job-work-challans').then((r) => r.data),
+    createChallan: (body: Record<string, unknown>) =>
+      api.post<any>('/manufacturing/job-work-challans', body).then((r) => r.data),
+    listReceipts: () =>
+      api.get<any[]>('/manufacturing/job-work-receipts').then((r) => r.data),
+    createReceipt: (body: Record<string, unknown>) =>
+      api.post<any>('/manufacturing/job-work-receipts', body).then((r) => r.data),
   },
 };

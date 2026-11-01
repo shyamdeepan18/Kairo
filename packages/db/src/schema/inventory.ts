@@ -223,6 +223,9 @@ export const items = pgTable(
     weightUom: varchar('weight_uom', { length: 20 }),
     /** Whether incoming goods require QC inspection before stock release */
     isQcRequired: boolean('is_qc_required').default(false).notNull(),
+    /** GAP 6: Catch-Weight Dual UOM */
+    isCatchWeight: boolean('is_catch_weight').default(false).notNull(),
+    catchWeightTolerancePct: numeric('catch_weight_tolerance_pct', { precision: 5, scale: 2 }).default('0').notNull(),
 
     // ── Pricing & Costing ──────────────────────────────────────────────────
     /** Standard cost in paise per primaryUom unit (for variance analysis) */
@@ -428,6 +431,8 @@ export const stockLedgerEntries = pgTable(
     costCentreId: uuid('cost_centre_id'),
     /** Production order that triggered this movement (issue or receipt) */
     productionOrderId: uuid('production_order_id'),
+    /** GAP 8: Project Accounting tag */
+    projectId: uuid('project_id'),
 
     postingDate: date('posting_date').notNull(),
     fiscalYear: varchar('fiscal_year', { length: 5 }).notNull(),
@@ -697,6 +702,8 @@ export const stockTransfers = pgTable(
     receivedBy: uuid('received_by').references(() => users.id),
     rejectedAt: timestamp('rejected_at', { withTimezone: true }),
     rejectedBy: uuid('rejected_by').references(() => users.id),
+    cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+    cancelledBy: uuid('cancelled_by').references(() => users.id),
 
     createdBy: uuid('created_by').notNull().references(() => users.id),
     updatedBy: uuid('updated_by').references(() => users.id),
@@ -723,6 +730,9 @@ export const stockTransferLines = pgTable(
 
     valuationRatePaise: integer('valuation_rate_paise').default(0).notNull(),
     valuationAmountPaise: integer('valuation_amount_paise').default(0).notNull(),
+
+    /** Cumulative quantity received inward at destination (for in-transit partial receipts) */
+    receivedQty: numeric('received_qty', { precision: 18, scale: 4 }).default('0').notNull(),
 
     batchId: uuid('batch_id').references(() => itemBatches.id),
 

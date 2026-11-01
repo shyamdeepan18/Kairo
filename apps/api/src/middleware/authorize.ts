@@ -83,7 +83,10 @@ export function authorize(
         (request as any).plantId ??
         get(request, 'body.plantId') ??
         get(request, 'params.plantId') ??
-        (request.query as any)?.plantId;
+        (request.query as any)?.plantId ??
+        request.tenant?.activePlantId ??
+        (request.user as any)?.activePlantId ??
+        undefined;
 
     const warehouseId: string | undefined = opts?.warehouseFrom
       ? get(request, opts.warehouseFrom)

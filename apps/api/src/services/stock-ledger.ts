@@ -66,6 +66,8 @@ export interface StockMovement {
    * For production_receipt: pass the computed production cost per unit.
    */
   valuationRatePaise?: number;
+  /** Explicit valuation amount in paise, required for valuation-only adjustments (qty = 0) */
+  valuationAmountPaise?: number;
 
   documentType: string;
   documentId: string;
@@ -79,6 +81,7 @@ export interface StockMovement {
 
   costCentreId?: string;
   productionOrderId?: string;
+  projectId?: string;
 
   postingDate: Date;
   remarks?: string;
@@ -129,14 +132,22 @@ export class StockLedgerService {
     let valuationAmountPaise: number;
 
     if (direction === 'IN') {
-      const rate = movement.valuationRatePaise;
-      if (rate === undefined || rate < 0) {
-        throw new Error(
-          `valuationRatePaise is required for inward movement type '${movement.movementType}'`
-        );
+      if (quantityInPrimaryUom === 0 && movement.valuationAmountPaise !== undefined) {
+        valuationAmountPaise = movement.valuationAmountPaise;
+        const currentQty = parseFloat(balance?.quantityOnHand ?? '0');
+        valuationRatePaise = currentQty > 0
+          ? Math.round(((balance?.valuationAmountPaise ?? 0) + valuationAmountPaise) / currentQty)
+          : 0;
+      } else {
+        const rate = movement.valuationRatePaise;
+        if (rate === undefined || rate < 0) {
+          throw new Error(
+            `valuationRatePaise is required for inward movement type '${movement.movementType}'`
+          );
+        }
+        valuationRatePaise = rate;
+        valuationAmountPaise = Math.round(quantityInPrimaryUom * rate);
       }
-      valuationRatePaise = rate;
-      valuationAmountPaise = Math.round(quantityInPrimaryUom * rate);
     } else {
       // Outward: issue at current WAC
       const currentRate = balance?.valuationRatePaise ?? 0;
@@ -174,6 +185,7 @@ export class StockLedgerService {
         serialId: movement.serialId ?? null,
         costCentreId: movement.costCentreId ?? null,
         productionOrderId: movement.productionOrderId ?? null,
+        projectId: movement.projectId ?? null,
         postingDate: movement.postingDate.toISOString().slice(0, 10),
         fiscalYear,
         period,
@@ -377,6 +389,7 @@ export class StockLedgerService {
     m: StockMovement,
     item: { trackingType: string; itemCode: string }
   ): void {
+    if (m.quantity === 0) return; // Valuation-only adjustment
     if (item.trackingType === 'batch' && !m.batchId) {
       throw new Error(`Item ${item.itemCode} requires batchId (trackingType = 'batch')`);
     }

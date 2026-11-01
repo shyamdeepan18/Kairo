@@ -1,16 +1,19 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { eq, and, desc, sql, inArray } from 'drizzle-orm';
 import {
-  db, items,
+  db, items, itemBatches,
   workCenters,
   productionFormulas, formulaInputs, formulaOutputs, formulaOperations,
   productionOrders, productionOrderMaterials, productionOrderOutputs,
   productionOrderOperations, productionOrderCosts,
+  jobWorkOrders, jobWorkOrderMaterials, jobWorkChallans, jobWorkChallanLines, jobWorkReceipts,
+  suppliers,
   plants, warehouses,
 } from '@erp/db';
 import {
   workCenterCreateSchema, formulaCreateSchema, productionOrderCreateSchema,
   issueMaterialsSchema, recordOutputSchema, transitionSchema,
+  jobWorkOrderCreateSchema, jobWorkChallanCreateSchema, jobWorkReceiptCreateSchema,
 } from '@erp/shared';
 import { authorize } from '../middleware/authorize.js';
 import { resolveTenantContext, tenant } from '../middleware/tenant-context.js';
@@ -45,6 +48,7 @@ export default async function manufacturingRoutes(app: FastifyInstance) {
   registerFormulas(app);
   registerOrders(app);
   registerOperations(app);
+  registerSubcontracting(app);
 }
 
 // ─── Shared helpers (mirror of routes/purchase.ts, routes/sales.ts) ─────────
@@ -652,5 +656,586 @@ function registerOperations(app: FastifyInstance) {
       request.log.error(err);
       return reply.code(409).send({ error: 'Operation complete failed', detail: (err as Error).message });
     }
+  });
+}
+
+// ─── Subcontracting & Outside Job Work (GAP 4) ──────────────────────────────
+
+function registerSubcontracting(app: FastifyInstance) {
+  const JWO_DOC = 'manufacturing.job_work_order';
+  const JWC_DOC = 'manufacturing.job_work_challan';
+  const JWR_DOC = 'manufacturing.job_work_receipt';
+
+  // 1. List Job Work Orders
+  app.get('/job-work-orders', {
+    preHandler: [app.authenticate, resolveTenantContext, authorize('manufacturing.order.view')],
+  }, async (request, reply) => {
+    const cid = tenant(request).companyId;
+    const rows = await db
+      .select({
+        id: jobWorkOrders.id,
+        documentNumber: jobWorkOrders.documentNumber,
+        postingDate: jobWorkOrders.postingDate,
+        status: jobWorkOrders.status,
+        vendorId: jobWorkOrders.vendorId,
+        vendorName: suppliers.name,
+        targetItemId: jobWorkOrders.targetItemId,
+        targetItemName: items.itemName,
+        targetQty: jobWorkOrders.targetQty,
+        issuedQty: jobWorkOrders.issuedQty,
+        receivedQty: jobWorkOrders.receivedQty,
+        uom: jobWorkOrders.uom,
+        serviceRatePaise: jobWorkOrders.serviceRatePaise,
+        totalServicePaise: jobWorkOrders.totalServicePaise,
+        expectedCompletionDate: jobWorkOrders.expectedCompletionDate,
+        createdAt: jobWorkOrders.createdAt,
+      })
+      .from(jobWorkOrders)
+      .innerJoin(suppliers, eq(jobWorkOrders.vendorId, suppliers.id))
+      .innerJoin(items, eq(jobWorkOrders.targetItemId, items.id))
+      .where(eq(jobWorkOrders.companyId, cid))
+      .orderBy(desc(jobWorkOrders.createdAt));
+
+    return reply.send(rows);
+  });
+
+  // 2. Create Job Work Order
+  app.post('/job-work-orders', {
+    preHandler: [app.authenticate, resolveTenantContext, authorize('manufacturing.order.create', { plantFrom: 'body.plantId' })],
+  }, async (request, reply) => {
+    const parsed = jobWorkOrderCreateSchema.safeParse(stripServerOwned(request.body));
+    if (!parsed.success) return bad(reply, parsed);
+    const d = parsed.data;
+    const cid = tenant(request).companyId;
+
+    await Promise.all([
+      assertOwned(plants, d.plantId, cid, 'Plant'),
+      assertOwned(suppliers, d.vendorId, cid, 'Supplier / Subcontractor'),
+      assertOwned(warehouses, d.vendorWarehouseId, cid, 'Vendor warehouse'),
+      assertOwned(items, d.targetItemId, cid, 'Target Item'),
+      assertAllOwned(items, d.materials.map((m) => m.itemId), cid, 'Raw Material Item'),
+    ]);
+
+    const { fiscalYear } = fiscalPeriod(new Date(d.postingDate));
+    const targetQtyNum = d.targetQty;
+    const totalServicePaise = Math.round(targetQtyNum * d.serviceRatePaise);
+
+    const created = await db.transaction(async (tx) => {
+      const documentNumber = await app.numberSeriesService.next(tx, cid, JWO_DOC, { fiscalYear, plantId: d.plantId });
+      const [jwo] = await tx
+        .insert(jobWorkOrders)
+        .values({
+          companyId: cid,
+          plantId: d.plantId,
+          documentNumber,
+          status: 'draft',
+          fiscalYear,
+          postingDate: d.postingDate as any,
+          vendorId: d.vendorId,
+          vendorWarehouseId: d.vendorWarehouseId,
+          targetItemId: d.targetItemId,
+          targetQty: d.targetQty.toString(),
+          uom: d.uom,
+          serviceRatePaise: d.serviceRatePaise,
+          serviceTaxCodeId: d.serviceTaxCodeId ?? null,
+          totalServicePaise,
+          expectedCompletionDate: d.expectedCompletionDate as any,
+          projectId: d.projectId ?? null,
+          remarks: d.remarks ?? null,
+          createdBy: userId(request),
+        })
+        .returning();
+
+      await tx.insert(jobWorkOrderMaterials).values(
+        d.materials.map((m) => ({
+          companyId: cid,
+          jobWorkOrderId: jwo.id,
+          itemId: m.itemId,
+          plannedQty: m.plannedQty.toString(),
+          uom: m.uom,
+        }))
+      );
+
+      await app.auditEngine.logCreate(
+        { companyId: cid, documentType: JWO_DOC, documentId: jwo.id, documentNumber, performedBy: userId(request) },
+        jwo,
+        { tx }
+      );
+      return jwo;
+    });
+
+    return reply.code(201).send(created);
+  });
+
+  // 3. Get Job Work Order Details
+  app.get('/job-work-orders/:id', {
+    preHandler: [app.authenticate, resolveTenantContext, authorize('manufacturing.order.view')],
+  }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const cid = tenant(request).companyId;
+
+    const [jwo] = await db
+      .select()
+      .from(jobWorkOrders)
+      .where(byTenantId(jobWorkOrders, id, cid))
+      .limit(1);
+
+    if (!jwo) return reply.code(404).send({ error: 'Job work order not found' });
+
+    const [materials, challans, receipts] = await Promise.all([
+      db
+        .select({
+          id: jobWorkOrderMaterials.id,
+          itemId: jobWorkOrderMaterials.itemId,
+          itemName: items.itemName,
+          itemCode: items.itemCode,
+          plannedQty: jobWorkOrderMaterials.plannedQty,
+          issuedQty: jobWorkOrderMaterials.issuedQty,
+          consumedQty: jobWorkOrderMaterials.consumedQty,
+          uom: jobWorkOrderMaterials.uom,
+        })
+        .from(jobWorkOrderMaterials)
+        .innerJoin(items, eq(jobWorkOrderMaterials.itemId, items.id))
+        .where(eq(jobWorkOrderMaterials.jobWorkOrderId, id)),
+      db
+        .select()
+        .from(jobWorkChallans)
+        .where(eq(jobWorkChallans.jobWorkOrderId, id)),
+      db
+        .select()
+        .from(jobWorkReceipts)
+        .where(eq(jobWorkReceipts.jobWorkOrderId, id)),
+    ]);
+
+    return reply.send({ ...jwo, materials, challans, receipts });
+  });
+
+  // Transitions for JWO
+  simpleTransition(app, { route: '/job-work-orders/:id/submit', table: jobWorkOrders, docType: JWO_DOC, to: 'submitted', perm: 'manufacturing.order.create' });
+  simpleTransition(app, { route: '/job-work-orders/:id/approve', table: jobWorkOrders, docType: JWO_DOC, to: 'approved', perm: 'manufacturing.order.approve' });
+  simpleTransition(app, { route: '/job-work-orders/:id/cancel', table: jobWorkOrders, docType: JWO_DOC, to: 'cancelled', perm: 'manufacturing.order.approve' });
+
+  // 4. Outward Subcon Challan (Material Issue to Subcontractor)
+  app.post('/job-work-challans', {
+    preHandler: [app.authenticate, resolveTenantContext, authorize('manufacturing.order.issue', { plantFrom: 'body.plantId' })],
+  }, async (request, reply) => {
+    const parsed = jobWorkChallanCreateSchema.safeParse(stripServerOwned(request.body));
+    if (!parsed.success) return bad(reply, parsed);
+    const d = parsed.data;
+    const cid = tenant(request).companyId;
+    const uid = userId(request);
+
+    const [jwo] = await db
+      .select()
+      .from(jobWorkOrders)
+      .where(byTenantId(jobWorkOrders, d.jobWorkOrderId, cid))
+      .limit(1);
+
+    if (!jwo) return reply.code(404).send({ error: 'Job work order not found' });
+    if (jwo.status !== 'approved' && jwo.status !== 'in_progress') {
+      return reply.code(409).send({ error: `Job work order must be approved or in progress (is '${jwo.status}')` });
+    }
+
+    const { fiscalYear } = fiscalPeriod(new Date(d.postingDate));
+
+    try {
+      const created = await db.transaction(async (tx) => {
+        const documentNumber = await app.numberSeriesService.next(tx, cid, JWC_DOC, { fiscalYear, plantId: d.plantId });
+
+        // Insert Challan header
+        const [challan] = await tx
+          .insert(jobWorkChallans)
+          .values({
+            companyId: cid,
+            plantId: d.plantId,
+            documentNumber,
+            status: 'approved',
+            fiscalYear,
+            postingDate: d.postingDate as any,
+            jobWorkOrderId: d.jobWorkOrderId,
+            vendorId: jwo.vendorId,
+            sourceWarehouseId: d.sourceWarehouseId,
+            vendorWarehouseId: jwo.vendorWarehouseId,
+            vehicleNumber: d.vehicleNumber ?? null,
+            ewayBillNumber: d.ewayBillNumber ?? null,
+            projectId: jwo.projectId,
+            remarks: d.remarks ?? null,
+            createdBy: uid,
+          })
+          .returning();
+
+        // Process stock movements: Transfer from source warehouse to vendor warehouse
+        let totalChallanValuePaise = 0;
+        const insertedLines = [];
+
+        for (let i = 0; i < d.lines.length; i++) {
+          const l = d.lines[i];
+
+          // 1. Move OUT of source warehouse
+          const outMovement = await app.stockLedger.post(tx, {
+            companyId: cid,
+            plantId: d.plantId,
+            warehouseId: d.sourceWarehouseId,
+            itemId: l.itemId,
+            movementType: 'subcon_issue',
+            quantity: l.quantity,
+            uom: l.uom,
+            documentType: JWC_DOC,
+            documentId: challan.id,
+            documentNumber: challan.documentNumber,
+            documentLineNumber: i + 1,
+            batchId: l.batchId,
+            postingDate: new Date(d.postingDate),
+            createdBy: uid,
+            projectId: jwo.projectId ?? undefined,
+          });
+
+          const ratePaise = outMovement.sle.valuationRatePaise;
+          const lineValuationPaise = outMovement.sle.valuationAmountPaise;
+          totalChallanValuePaise += lineValuationPaise;
+
+          // 2. Move IN to vendor warehouse (same valuation)
+          await app.stockLedger.post(tx, {
+            companyId: cid,
+            plantId: d.plantId,
+            warehouseId: jwo.vendorWarehouseId,
+            itemId: l.itemId,
+            movementType: 'transfer_receipt',
+            quantity: l.quantity,
+            uom: l.uom,
+            documentType: JWC_DOC,
+            documentId: challan.id,
+            documentNumber: challan.documentNumber,
+            documentLineNumber: i + 1,
+            batchId: l.batchId,
+            valuationRatePaise: ratePaise,
+            postingDate: new Date(d.postingDate),
+            createdBy: uid,
+            projectId: jwo.projectId ?? undefined,
+          });
+
+          // Insert line
+          const [cline] = await tx
+            .insert(jobWorkChallanLines)
+            .values({
+              challanId: challan.id,
+              itemId: l.itemId,
+              quantity: l.quantity.toString(),
+              uom: l.uom,
+              batchId: l.batchId ?? null,
+              batchNumber: l.batchNumber ?? null,
+              ratePaise,
+              amountPaise: lineValuationPaise,
+            })
+            .returning();
+          insertedLines.push(cline);
+
+          // Update issuedQty in jobWorkOrderMaterials
+          await tx
+            .update(jobWorkOrderMaterials)
+            .set({
+              issuedQty: sql`${jobWorkOrderMaterials.issuedQty} + ${l.quantity}`,
+              updatedAt: new Date(),
+            })
+            .where(and(
+              eq(jobWorkOrderMaterials.jobWorkOrderId, jwo.id),
+              eq(jobWorkOrderMaterials.itemId, l.itemId),
+            ));
+        }
+
+        // Update JWO status to in_progress
+        await tx
+          .update(jobWorkOrders)
+          .set({ status: 'in_progress', updatedAt: new Date() })
+          .where(eq(jobWorkOrders.id, jwo.id));
+
+        await app.auditEngine.logCreate(
+          { companyId: cid, documentType: JWC_DOC, documentId: challan.id, documentNumber, performedBy: uid },
+          challan,
+          { tx }
+        );
+
+        return { ...challan, lines: insertedLines, totalChallanValuePaise };
+      });
+
+      return reply.code(201).send(created);
+    } catch (err: any) {
+      request.log.error(err);
+      return reply.code(409).send({ error: 'Outward challan creation failed', detail: err.message });
+    }
+  });
+
+  // 5. Inward Subcon Receipt & Service Capitalization
+  app.post('/job-work-receipts', {
+    preHandler: [app.authenticate, resolveTenantContext, authorize('manufacturing.order.issue', { plantFrom: 'body.plantId' })],
+  }, async (request, reply) => {
+    const parsed = jobWorkReceiptCreateSchema.safeParse(stripServerOwned(request.body));
+    if (!parsed.success) return bad(reply, parsed);
+    const d = parsed.data;
+    const cid = tenant(request).companyId;
+    const uid = userId(request);
+
+    const [jwo] = await db
+      .select()
+      .from(jobWorkOrders)
+      .where(byTenantId(jobWorkOrders, d.jobWorkOrderId, cid))
+      .limit(1);
+
+    if (!jwo) return reply.code(404).send({ error: 'Job work order not found' });
+    if (jwo.status !== 'in_progress' && jwo.status !== 'approved') {
+      return reply.code(409).send({ error: `Job work order must be in progress or approved (is '${jwo.status}')` });
+    }
+
+    const { fiscalYear, period } = fiscalPeriod(new Date(d.postingDate));
+
+    try {
+      const created = await db.transaction(async (tx) => {
+        const documentNumber = await app.numberSeriesService.next(tx, cid, JWR_DOC, { fiscalYear, plantId: d.plantId });
+
+        // 1. Consume raw materials from vendor warehouse
+        let rawMaterialCostPaise = 0;
+        const materials = await tx
+          .select()
+          .from(jobWorkOrderMaterials)
+          .where(eq(jobWorkOrderMaterials.jobWorkOrderId, jwo.id));
+
+        // Use custom consumption lines if passed, or pro-rata based on planned recipe
+        const consumptionPlan = d.rawMaterialsConsumed && d.rawMaterialsConsumed.length > 0
+          ? d.rawMaterialsConsumed
+          : materials.map((m) => {
+              const ratio = d.receivedQty / parseFloat(jwo.targetQty);
+              return {
+                itemId: m.itemId,
+                quantity: parseFloat(m.plannedQty) * ratio,
+                uom: m.uom,
+                batchId: undefined as string | undefined,
+              };
+            });
+
+        for (const item of consumptionPlan) {
+          if (item.quantity > 0) {
+            const consumed = await app.stockLedger.post(tx, {
+              companyId: cid,
+              plantId: d.plantId,
+              warehouseId: jwo.vendorWarehouseId,
+              itemId: item.itemId,
+              movementType: 'issue_to_production',
+              quantity: item.quantity,
+              uom: item.uom,
+              documentType: JWR_DOC,
+              documentId: jwo.id,
+              documentNumber,
+              postingDate: new Date(d.postingDate),
+              createdBy: uid,
+              batchId: item.batchId,
+              projectId: jwo.projectId ?? undefined,
+            });
+
+            rawMaterialCostPaise += consumed.sle.valuationAmountPaise;
+
+            // Update consumedQty
+            await tx
+              .update(jobWorkOrderMaterials)
+              .set({
+                consumedQty: sql`${jobWorkOrderMaterials.consumedQty} + ${item.quantity}`,
+                updatedAt: new Date(),
+              })
+              .where(and(
+                eq(jobWorkOrderMaterials.jobWorkOrderId, jwo.id),
+                eq(jobWorkOrderMaterials.itemId, item.itemId),
+              ));
+          }
+        }
+
+        // 2. Subcontractor service fee for this receipt
+        const serviceChargePaise = Math.round(d.receivedQty * jwo.serviceRatePaise);
+        const totalCostPaise = rawMaterialCostPaise + serviceChargePaise;
+        const unitCostPaise = Math.round(totalCostPaise / d.receivedQty);
+
+        // 3. Batch management for received target item
+        let batchId: string | undefined;
+        if (d.batchNumber) {
+          const [existingBatch] = await tx
+            .select()
+            .from(itemBatches)
+            .where(and(
+              eq(itemBatches.companyId, cid),
+              eq(itemBatches.itemId, jwo.targetItemId),
+              eq(itemBatches.batchNumber, d.batchNumber),
+            ))
+            .limit(1);
+
+          if (existingBatch) {
+            batchId = existingBatch.id;
+          } else {
+            const [newBatch] = await tx
+              .insert(itemBatches)
+              .values({
+                companyId: cid,
+                itemId: jwo.targetItemId,
+                batchNumber: d.batchNumber,
+                expiryDate: d.batchExpiryDate as any,
+                qcStatus: 'approved',
+                createdBy: uid,
+              })
+              .returning();
+            batchId = newBatch.id;
+          }
+        }
+
+        // 4. Stock Receipt: FG received into destination warehouse with full capitalized cost
+        await app.stockLedger.post(tx, {
+          companyId: cid,
+          plantId: d.plantId,
+          warehouseId: d.destinationWarehouseId,
+          itemId: jwo.targetItemId,
+          movementType: 'production_receipt',
+          quantity: d.receivedQty,
+          uom: d.uom,
+          documentType: JWR_DOC,
+          documentId: jwo.id,
+          documentNumber,
+          valuationRatePaise: unitCostPaise,
+          postingDate: new Date(d.postingDate),
+          createdBy: uid,
+          batchId,
+          projectId: jwo.projectId ?? undefined,
+        });
+
+        // 5. Post Double-Entry Journal Entry
+        // DR FG / CR WIP (RM cost) / CR AP (Service fee)
+        const postCtx: PostingContext = {
+          companyId: cid,
+          plantId: d.plantId,
+          documentType: 'manufacturing.subcon_receipt',
+          documentId: jwo.id,
+          documentNumber,
+          postingDate: new Date(d.postingDate),
+          fiscalYear,
+          period,
+          header: {
+            totalValuePaise: totalCostPaise,
+            rawMaterialValuePaise: rawMaterialCostPaise,
+            serviceChargePaise,
+            inventoryCategory: 'inventory_finished',
+          },
+          lines: [],
+        };
+        const jeId = await app.postingEngine.post(tx, postCtx, uid);
+
+        // 6. Insert Job Work Receipt row
+        const [receipt] = await tx
+          .insert(jobWorkReceipts)
+          .values({
+            companyId: cid,
+            plantId: d.plantId,
+            documentNumber,
+            status: 'approved',
+            fiscalYear,
+            postingDate: d.postingDate as any,
+            jobWorkOrderId: jwo.id,
+            vendorId: jwo.vendorId,
+            targetItemId: jwo.targetItemId,
+            receivedQty: d.receivedQty.toString(),
+            uom: d.uom,
+            destinationWarehouseId: d.destinationWarehouseId,
+            vendorWarehouseId: jwo.vendorWarehouseId,
+            batchNumber: d.batchNumber ?? null,
+            batchExpiryDate: d.batchExpiryDate as any,
+            rawMaterialCostPaise,
+            serviceChargePaise,
+            totalCostPaise,
+            unitCostPaise,
+            journalEntryId: jeId,
+            projectId: jwo.projectId,
+            remarks: d.remarks ?? null,
+            createdBy: uid,
+          })
+          .returning();
+
+        // 7. Update JWO receivedQty and check completion
+        const newReceivedQty = parseFloat(jwo.receivedQty) + d.receivedQty;
+        const isComplete = newReceivedQty >= parseFloat(jwo.targetQty) - 1e-4;
+
+        await tx
+          .update(jobWorkOrders)
+          .set({
+            receivedQty: newReceivedQty.toString(),
+            status: isComplete ? 'completed' : 'in_progress',
+            updatedAt: new Date(),
+          })
+          .where(eq(jobWorkOrders.id, jwo.id));
+
+        await app.auditEngine.logCreate(
+          { companyId: cid, documentType: JWR_DOC, documentId: receipt.id, documentNumber, performedBy: uid },
+          receipt,
+          { tx }
+        );
+
+        return receipt;
+      });
+
+      return reply.code(201).send(created);
+    } catch (err: any) {
+      request.log.error(err);
+      return reply.code(409).send({ error: 'Job work receipt failed', detail: err.message });
+    }
+  });
+
+  // 6. List Outward Challans
+  app.get('/job-work-challans', {
+    preHandler: [app.authenticate, resolveTenantContext, authorize('manufacturing.order.view')],
+  }, async (request, reply) => {
+    const cid = tenant(request).companyId;
+    const rows = await db
+      .select({
+        id: jobWorkChallans.id,
+        documentNumber: jobWorkChallans.documentNumber,
+        postingDate: jobWorkChallans.postingDate,
+        status: jobWorkChallans.status,
+        vendorName: suppliers.name,
+        sourceWarehouseId: jobWorkChallans.sourceWarehouseId,
+        vendorWarehouseId: jobWorkChallans.vendorWarehouseId,
+        vehicleNumber: jobWorkChallans.vehicleNumber,
+        ewayBillNumber: jobWorkChallans.ewayBillNumber,
+        createdAt: jobWorkChallans.createdAt,
+      })
+      .from(jobWorkChallans)
+      .innerJoin(suppliers, eq(jobWorkChallans.vendorId, suppliers.id))
+      .where(eq(jobWorkChallans.companyId, cid))
+      .orderBy(desc(jobWorkChallans.createdAt));
+
+    return reply.send(rows);
+  });
+
+  // 7. List Receipts
+  app.get('/job-work-receipts', {
+    preHandler: [app.authenticate, resolveTenantContext, authorize('manufacturing.order.view')],
+  }, async (request, reply) => {
+    const cid = tenant(request).companyId;
+    const rows = await db
+      .select({
+        id: jobWorkReceipts.id,
+        documentNumber: jobWorkReceipts.documentNumber,
+        postingDate: jobWorkReceipts.postingDate,
+        vendorName: suppliers.name,
+        targetItemName: items.itemName,
+        receivedQty: jobWorkReceipts.receivedQty,
+        uom: jobWorkReceipts.uom,
+        unitCostPaise: jobWorkReceipts.unitCostPaise,
+        totalCostPaise: jobWorkReceipts.totalCostPaise,
+        rawMaterialCostPaise: jobWorkReceipts.rawMaterialCostPaise,
+        serviceChargePaise: jobWorkReceipts.serviceChargePaise,
+        batchNumber: jobWorkReceipts.batchNumber,
+        journalEntryId: jobWorkReceipts.journalEntryId,
+        createdAt: jobWorkReceipts.createdAt,
+      })
+      .from(jobWorkReceipts)
+      .innerJoin(suppliers, eq(jobWorkReceipts.vendorId, suppliers.id))
+      .innerJoin(items, eq(jobWorkReceipts.targetItemId, items.id))
+      .where(eq(jobWorkReceipts.companyId, cid))
+      .orderBy(desc(jobWorkReceipts.createdAt));
+
+    return reply.send(rows);
   });
 }

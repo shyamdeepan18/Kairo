@@ -5,3 +5,4 @@ export * from './validators/sales.js';
 export * from './validators/manufacturing.js';
 export * from './validators/inventory.js';
 export * from './validators/governance.js';
+export * from './validators/accounting.js';

@@ -12,6 +12,7 @@ import {
 import { useAuthStore } from '../store/auth';
 import { useThemeStore } from '../store/theme';
 import { usePlantStore, type ErpCompany, type ErpPlant } from '../store/plant';
+import { useWorkspaceStore } from '../store/workspace';
 import { authApi } from '../api/auth';
 import { companiesApi } from '../api/companies';
 
@@ -65,6 +66,7 @@ export function SelectCompanyPage() {
 
     setSelectedCompany(company);
     setCompany(company);
+    useWorkspaceStore.getState().closeAll();
     setLoading(true);
     setError(null);
     try {
@@ -98,6 +100,7 @@ export function SelectCompanyPage() {
         setLoading(true);
         const { accessToken } = await authApi.selectContext(selectedCompany.id, plant.id);
         if (user) setAuth(user, accessToken);
+        useWorkspaceStore.getState().closeAll();
         setPlant(plant);
         navigate('/dashboard', { replace: true });
       } catch (err: any) {

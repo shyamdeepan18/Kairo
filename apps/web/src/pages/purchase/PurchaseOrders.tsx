@@ -3,11 +3,11 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import dayjs from 'dayjs';
 import {
-  Drawer, Form, Input, Select, DatePicker, InputNumber, Popconfirm, message, Descriptions
+  Drawer, Form, Input, Select, DatePicker, InputNumber, Popconfirm, message, Descriptions, Modal
 } from 'antd';
 import {
   ShoppingCart, Search, Plus, Eye, Send, CheckCircle2, XCircle, StopCircle, 
-  Trash2, FileText, Calendar, Building2, Receipt, ArrowRight, ClipboardList
+  Trash2, FileText, Calendar, Building2, Receipt, ArrowRight, ClipboardList, Edit2, XOctagon
 } from 'lucide-react';
 import { usePlantStore } from '../../store/plant';
 import { purchaseApi, computeLine, apiErr, type PurchaseHeader, type Supplier } from '../../api/purchase';
@@ -15,6 +15,7 @@ import { mastersApi, type Item } from '../../api/masters';
 import { settingsApi, type TaxCode } from '../../api/settings';
 import { StatusBadge, type DocumentStatus } from '../../components/shared/StatusBadge';
 import { AmountDisplay } from '../../components/shared/AmountDisplay';
+import { DynamicCustomFields } from '../../components/DynamicCustomFields';
 
 interface DraftLine {
   key: number;
@@ -40,10 +41,12 @@ export function PurchaseOrdersPage() {
 
   const [rows, setRows] = useState<PurchaseHeader[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [blanketOrders, setBlanketOrders] = useState<any[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [taxCodes, setTaxCodes] = useState<TaxCode[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
+  const [searchQuery, setSearchQuery] = useState('');
 
   const [drawer, setDrawer] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -68,9 +71,37 @@ export function PurchaseOrdersPage() {
   useEffect(() => {
     if (!company?.id) return;
     purchaseApi.suppliers.list(company.id).then((r) => setSuppliers(r.data)).catch(() => {});
+    purchaseApi.blanketOrders.list(company.id, { status: 'approved' }).then((r: any) => setBlanketOrders(Array.isArray(r) ? r : (r.data ?? []))).catch(() => {});
     mastersApi.listItems(company.id).then(setItems).catch(() => {});
     settingsApi.listTaxCodes(company.id).then(setTaxCodes).catch(() => {});
   }, [company?.id]);
+
+  const filteredRows = React.useMemo(() => {
+    if (!searchQuery.trim()) return rows;
+    const q = searchQuery.toLowerCase();
+    return rows.filter((r) =>
+      r.documentNumber.toLowerCase().includes(q) ||
+      supplierName(r.supplierId).toLowerCase().includes(q)
+    );
+  }, [rows, searchQuery, suppliers]);
+
+  const handleShortClose = (r: PurchaseHeader) => {
+    Modal.confirm({
+      title: 'Short-Close Purchase Order?',
+      content: `Are you sure you want to short-close PO ${r.documentNumber}? Any remaining unreceived quantities will be closed.`,
+      okText: 'Short-Close',
+      okType: 'danger',
+      onOk: async () => {
+        try {
+          await purchaseApi.orders.shortClose(r.id);
+          message.success('Purchase order short-closed.');
+          load();
+        } catch (e) {
+          message.error(apiErr(e));
+        }
+      },
+    });
+  };
 
   useEffect(() => {
     if (location.state?.createPoFromLines && location.state?.supplierId) {
@@ -165,8 +196,10 @@ export function PurchaseOrdersPage() {
       postingDate: values.postingDate?.format?.('YYYY-MM-DD'),
       supplierId: values.supplierId,
       requisitionId: values.requisitionId || undefined,
+      blanketPoId: values.blanketPoId || undefined,
       expectedDeliveryDate: values.expectedDeliveryDate?.format?.('YYYY-MM-DD') || undefined,
       remarks: values.remarks || undefined,
+      custom_data: values.customData || undefined,
       lines: validLines.map((l) => {
         const c = lineComputed(l);
         return {
@@ -221,50 +254,152 @@ export function PurchaseOrdersPage() {
   }));
   const taxOptions = taxCodes.map((t) => ({ value: t.id, label: `${t.code} (${t.gstRateBp / 100}%)` }));
 
+  const totalOrders = rows.length;
+  const totalOrderValuePaise = rows.reduce((s, r) => s + (r.totalAmountPaise || 0), 0);
+  const pendingApprovals = rows.filter((r) => r.status === 'submitted').length;
+  const approvedOrders = rows.filter((r) => r.status === 'approved').length;
+
   return (
-    <div className="h-full flex flex-col bg-slate-50 dark:bg-slate-900 transition-colors">
-      {/* Header */}
-      <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 py-6 flex flex-col lg:flex-row justify-between items-start lg:items-center shrink-0 transition-colors relative z-10 gap-4">
-        <div className="flex items-center space-x-3">
-          <div className="p-2 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-lg">
+    <div className="h-full flex flex-col bg-slate-50 dark:bg-slate-950 min-h-screen text-slate-900 dark:text-slate-100 transition-colors">
+      {/* Universal Page Header Bar */}
+      <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0 shadow-xs">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/40 rounded-xl">
             <ShoppingCart className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-slate-900 dark:text-white dark:text-white transition-colors">Purchase Orders</h1>
-            <p className="text-sm text-slate-500 dark:text-slate-400 dark:text-slate-400 transition-colors">Track and manage vendor orders & approvals</p>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold tracking-wider text-slate-500 dark:text-slate-400 uppercase">Purchase</span>
+              <span className="text-xs text-slate-300 dark:text-slate-700">/</span>
+              <span className="text-xs font-medium text-indigo-600 dark:text-indigo-400">Purchase Orders</span>
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+              Purchase Orders
+            </h1>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Track and manage vendor procurement, multi-level approval workflows, and goods receipt tracking
+            </p>
           </div>
         </div>
-        <button 
-          onClick={openCreate}
-          className="flex items-center px-4 py-2 bg-emerald-600 dark:bg-emerald-600/90 text-white font-bold rounded-lg shadow-sm hover:bg-emerald-700 dark:hover:bg-emerald-500 transition-colors"
-        >
-          <Plus className="w-4 h-4 mr-2" /> New PO
-        </button>
+
+        <div className="flex items-center gap-3">
+          <button 
+            type="button"
+            onClick={openCreate}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white rounded-xl shadow-xs text-sm font-semibold transition-all cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            New PO
+          </button>
+        </div>
       </div>
 
-      <div className="flex-1 p-6 overflow-auto">
-        <div className="mb-4 flex items-center space-x-4">
-          <div className="relative">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 dark:text-slate-400" />
-            <input 
-              type="text" 
-              placeholder="Search PO number..." 
-              className="pl-9 pr-4 py-2 w-64 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-lg text-sm text-slate-900 dark:text-white dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
-            />
+      {/* Main Content Area */}
+      <div className="p-6 max-w-7xl mx-auto w-full flex-1 flex flex-col gap-6">
+        {/* KPI Stats Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+              <span className="text-xs font-semibold uppercase tracking-wider">Total Orders</span>
+              <div className="p-2 bg-indigo-50 dark:bg-indigo-950/60 rounded-xl text-indigo-600 dark:text-indigo-400">
+                <ShoppingCart className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="mt-2 text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+              {totalOrders}
+            </div>
+            <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Purchase orders logged
+            </div>
           </div>
-          <Select 
-            allowClear 
-            placeholder="All Statuses" 
-            value={statusFilter} 
-            onChange={setStatusFilter} 
-            style={{ minWidth: 150 }} 
-            options={['draft', 'submitted', 'approved', 'cancelled'].map(s => ({ value: s, label: s.charAt(0).toUpperCase() + s.slice(1) }))} 
-          />
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+              <span className="text-xs font-semibold uppercase tracking-wider">Committed Spend</span>
+              <div className="p-2 bg-emerald-50 dark:bg-emerald-950/60 rounded-xl text-emerald-600 dark:text-emerald-400">
+                <Receipt className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="mt-2 text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">
+              <AmountDisplay paise={totalOrderValuePaise} />
+            </div>
+            <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Cumulative order value
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+              <span className="text-xs font-semibold uppercase tracking-wider">Pending Approvals</span>
+              <div className="p-2 bg-amber-50 dark:bg-amber-950/60 rounded-xl text-amber-600 dark:text-amber-400">
+                <ClipboardList className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="mt-2 text-2xl font-bold tracking-tight text-amber-600 dark:text-amber-400">
+              {pendingApprovals}
+            </div>
+            <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Awaiting manager sign-off
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+              <span className="text-xs font-semibold uppercase tracking-wider">Approved & Open</span>
+              <div className="p-2 bg-blue-50 dark:bg-blue-950/60 rounded-xl text-blue-600 dark:text-blue-400">
+                <CheckCircle2 className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="mt-2 text-2xl font-bold tracking-tight text-blue-600 dark:text-blue-400">
+              {approvedOrders}
+            </div>
+            <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Ready for GRN inward
+            </div>
+          </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden transition-colors min-h-[400px]">
+        {/* Filter Bar */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-xs flex flex-col sm:flex-row gap-3 items-center justify-between">
+          <div className="relative w-full sm:w-80">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
+            <input 
+              type="text" 
+              placeholder="Search PO number or supplier..." 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-4 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white"
+            />
+          </div>
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            <Select 
+              allowClear 
+              placeholder="All Statuses" 
+              value={statusFilter} 
+              onChange={setStatusFilter} 
+              className="w-44" 
+              options={['draft', 'submitted', 'approved', 'cancelled', 'closed'].map(s => ({ value: s, label: s.charAt(0).toUpperCase() + s.slice(1) }))} 
+            />
+          </div>
+        </div>
+
+        {/* Orders Table Container */}
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center">
+            <div>
+              <h3 className="font-semibold text-slate-900 dark:text-white">
+                Purchase Order Registry
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Authorized vendor purchase contracts and delivery schedules
+              </p>
+            </div>
+            <span className="text-xs font-mono px-2.5 py-1 bg-slate-100 dark:bg-slate-800 rounded-lg text-slate-600 dark:text-slate-400">
+              {filteredRows.length} orders
+            </span>
+          </div>
           <table className="w-full text-sm text-left">
-            <thead className="text-xs text-slate-500 dark:text-slate-400 dark:text-slate-400 uppercase bg-slate-50/50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 transition-colors">
+            <thead className="text-xs text-slate-500 dark:text-slate-400 uppercase bg-slate-50/50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 transition-colors">
               <tr>
                 <th className="px-6 py-4 font-bold">PO Number</th>
                 <th className="px-6 py-4 font-bold">Supplier</th>
@@ -275,27 +410,27 @@ export function PurchaseOrdersPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50 dark:divide-slate-800/50">
-              {rows.map(r => (
+              {filteredRows.map(r => (
                 <tr key={r.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition-colors group">
                   <td className="px-6 py-4">
                     <div className="flex items-center space-x-2">
-                      <FileText className="w-4 h-4 text-slate-400 dark:text-slate-500 dark:text-slate-400" />
+                      <FileText className="w-4 h-4 text-slate-400 dark:text-slate-500" />
                       <span className="font-mono font-bold text-indigo-700 dark:text-indigo-400 transition-colors">{r.documentNumber}</span>
                     </div>
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center space-x-2">
-                      <Building2 className="w-4 h-4 text-slate-400 dark:text-slate-500 dark:text-slate-400" />
-                      <span className="text-slate-800 dark:text-slate-200 dark:text-slate-200 font-medium transition-colors">{supplierName(r.supplierId)}</span>
+                      <Building2 className="w-4 h-4 text-slate-400 dark:text-slate-500" />
+                      <span className="text-slate-800 dark:text-slate-200 font-medium transition-colors">{supplierName(r.supplierId)}</span>
                     </div>
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center space-x-2">
-                      <Calendar className="w-4 h-4 text-slate-400 dark:text-slate-500 dark:text-slate-400" />
-                      <span className="text-slate-500 dark:text-slate-400 dark:text-slate-400 font-medium transition-colors">{r.postingDate}</span>
+                      <Calendar className="w-4 h-4 text-slate-400 dark:text-slate-500" />
+                      <span className="text-slate-500 dark:text-slate-400 font-medium transition-colors">{r.postingDate}</span>
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-right font-mono text-slate-900 dark:text-white dark:text-white font-medium transition-colors">
+                  <td className="px-6 py-4 text-right font-mono text-slate-900 dark:text-white font-bold transition-colors">
                     <AmountDisplay paise={r.totalAmountPaise} />
                   </td>
                   <td className="px-6 py-4 text-center">
@@ -303,17 +438,17 @@ export function PurchaseOrdersPage() {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end space-x-3">
-                      <button onClick={() => openView(r)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
+                      <button onClick={() => openView(r)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors" title="View details">
                         <Eye className="w-4 h-4" />
                       </button>
                       
                       {r.status === 'draft' && (
                         <>
+                          <button onClick={() => openEdit(r)} className="flex items-center text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 text-xs font-bold transition-colors">
+                            <Edit2 className="w-3.5 h-3.5 mr-1" /> Edit
+                          </button>
                           <button onClick={() => runAction(r, 'submit')} className="flex items-center text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 text-xs font-bold transition-colors">
                             <Send className="w-3.5 h-3.5 mr-1" /> Submit
-                          </button>
-                          <button onClick={() => openEdit(r)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white dark:hover:text-slate-200 text-xs font-bold transition-colors">
-                            Edit
                           </button>
                         </>
                       )}
@@ -328,7 +463,7 @@ export function PurchaseOrdersPage() {
                             return <span className="text-emerald-600 dark:text-emerald-500 text-xs italic font-bold">Approved. Waiting...</span>;
                           }
                           if (!isEligible) {
-                            return <span className="text-slate-500 dark:text-slate-400 dark:text-slate-400 text-xs italic">Pending: {(r as any).approvalInfo.currentApproverName}</span>;
+                            return <span className="text-slate-500 dark:text-slate-400 text-xs italic">Pending: {(r as any).approvalInfo.currentApproverName}</span>;
                           }
                         }
 
@@ -342,19 +477,24 @@ export function PurchaseOrdersPage() {
                       })()}
 
                       {r.status === 'approved' && (
-                        <Popconfirm title="Cancel this PO?" onConfirm={() => runAction(r, 'cancel')}>
-                          <button className="flex items-center text-rose-600 dark:text-rose-400 hover:text-rose-800 dark:hover:text-rose-300 text-xs font-bold transition-colors">
-                            <StopCircle className="w-3.5 h-3.5 mr-1" /> Cancel
+                        <>
+                          <Popconfirm title="Cancel this PO?" onConfirm={() => runAction(r, 'cancel')}>
+                            <button className="flex items-center text-rose-600 dark:text-rose-400 hover:text-rose-800 dark:hover:text-rose-300 text-xs font-bold transition-colors">
+                              <StopCircle className="w-3.5 h-3.5 mr-1" /> Cancel
+                            </button>
+                          </Popconfirm>
+                          <button onClick={() => handleShortClose(r)} className="flex items-center text-orange-600 dark:text-orange-400 hover:text-orange-800 dark:hover:text-orange-300 text-xs font-bold transition-colors" title="Close remaining unreceived lines">
+                            <XOctagon className="w-3.5 h-3.5 mr-1" /> Short-Close
                           </button>
-                        </Popconfirm>
+                        </>
                       )}
                     </div>
                   </td>
                 </tr>
               ))}
-              {rows.length === 0 && !loading && (
+              {filteredRows.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center text-slate-500 dark:text-slate-400 dark:text-slate-400 transition-colors">
+                  <td colSpan={6} className="px-6 py-12 text-center text-slate-500 dark:text-slate-400 transition-colors">
                     <ClipboardList className="w-8 h-8 mx-auto mb-2 opacity-50" />
                     No purchase orders found
                   </td>
@@ -379,9 +519,12 @@ export function PurchaseOrdersPage() {
         <Form form={form} layout="vertical" onFinish={save} requiredMark={false} className="space-y-4">
           <Form.Item name="id" hidden><Input /></Form.Item>
           
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-700/50">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-700/50">
             <Form.Item name="supplierId" label={<span className="font-bold text-slate-700 dark:text-slate-300">Supplier</span>} rules={[{ required: true }]} className="mb-0 col-span-1 md:col-span-1">
               <Select showSearch optionFilterProp="label" placeholder="Select supplier" options={suppliers.map((s) => ({ value: s.id, label: `${s.supplierCode} — ${s.name}` }))} />
+            </Form.Item>
+            <Form.Item name="blanketPoId" label={<span className="font-bold text-slate-700 dark:text-slate-300">Blanket Contract</span>} className="mb-0 col-span-1 md:col-span-1">
+              <Select allowClear showSearch optionFilterProp="label" placeholder="Optional Rate Contract" options={blanketOrders.map((b) => ({ value: b.id, label: `${b.documentNumber} (${b.supplierName ?? 'Supplier'})` }))} />
             </Form.Item>
             <Form.Item name="postingDate" label={<span className="font-bold text-slate-700 dark:text-slate-300">PO Date</span>} rules={[{ required: true }]} className="mb-0">
               <DatePicker style={{ width: '100%' }} />
@@ -468,6 +611,11 @@ export function PurchaseOrdersPage() {
             </div>
           </div>
 
+          <DynamicCustomFields
+            companyId={company?.id}
+            documentType="purchase.po"
+          />
+
           <Form.Item name="remarks" label={<span className="font-bold text-slate-700 dark:text-slate-300">Remarks / Terms</span>} className="mt-4">
             <Input.TextArea rows={2} className="rounded-lg" placeholder="Enter terms and conditions, delivery instructions, etc." />
           </Form.Item>
@@ -487,8 +635,8 @@ export function PurchaseOrdersPage() {
       >
         {viewing && (
           <div className="space-y-6">
-            <div className="grid grid-cols-2 gap-4 p-5 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-700/50">
-              <div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-5 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-700/50">
+              <div className="col-span-2">
                 <p className="text-xs text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Supplier</p>
                 <p className="font-medium text-slate-900 dark:text-white mt-1">{supplierName(viewing.supplierId)}</p>
               </div>
@@ -500,10 +648,13 @@ export function PurchaseOrdersPage() {
                 <p className="text-xs text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Status</p>
                 <div className="mt-1"><StatusBadge status={viewing.status} size="small" /></div>
               </div>
-              <div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Total Value</p>
-                <p className="font-bold font-mono text-indigo-700 text-lg mt-1"><AmountDisplay paise={viewing.totalAmountPaise} /></p>
-              </div>
+            </div>
+
+            <div className="flex justify-end p-4 bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-100 dark:border-indigo-800/50 rounded-lg">
+               <div className="flex flex-col items-end">
+                  <p className="text-sm font-bold text-indigo-800 dark:text-indigo-300">Total PO Amount</p>
+                  <p className="font-mono text-2xl font-black text-indigo-700 dark:text-indigo-400 mt-1"><AmountDisplay paise={viewing.totalAmountPaise} /></p>
+               </div>
             </div>
             
             {viewing.remarks && (

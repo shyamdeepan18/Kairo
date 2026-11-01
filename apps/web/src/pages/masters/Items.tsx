@@ -4,7 +4,8 @@ import {
   Table, Button, Drawer, Form, Input, Select, Switch, Typography, Tag,
   InputNumber, message, Tabs, Row, Col, theme as antTheme,
 } from 'antd';
-import { PlusOutlined, EditOutlined, SearchOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined } from '@ant-design/icons';
+import { Package, Plus, Search, Layers, CheckCircle2, Boxes, Factory } from 'lucide-react';
 import {
   mastersApi, ITEM_TYPES, TRACKING_TYPES, itemTypeMeta,
   type Item, type ItemGroup, type Uom,
@@ -251,44 +252,134 @@ export function ItemsPage() {
   const uomOptions = uoms.map((u) => ({ value: u.code, label: `${u.code} — ${u.name}` }));
   const isService = watchType === 'service';
 
+  const activeCount = items.filter(i => i.isActive).length;
+  const rawCount = items.filter(i => i.itemType === 'raw_material').length;
+  const fgCount = items.filter(i => i.itemType === 'finished_good').length;
+
   return (
-    <div>
-      <div className="mb-5 flex justify-between items-start">
-        <div>
-          <h2 className="m-0 font-bold text-lg text-slate-900 dark:text-white">Items</h2>
-          <span className="text-[13px] text-slate-500 dark:text-slate-400">{items.length} item{items.length !== 1 ? 's' : ''}</span>
+    <div className="h-full flex flex-col bg-slate-50 dark:bg-slate-950 min-h-screen text-slate-900 dark:text-slate-100 transition-colors">
+      {/* Top Header Bar */}
+      <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0 transition-colors">
+        <div className="flex items-center space-x-3.5">
+          <div className="p-2.5 bg-teal-50 dark:bg-teal-950/50 text-teal-600 dark:text-teal-400 border border-teal-100 dark:border-teal-900/40 rounded-xl shadow-xs">
+            <Package className="w-6 h-6" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mb-0.5">
+              <span>Masters</span>
+              <span>/</span>
+              <span className="text-teal-600 dark:text-teal-400 font-medium">Item Catalog</span>
+            </div>
+            <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
+              Item & SKU Master
+            </h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Manage raw materials, work-in-progress, finished products, and service items with dual-UOM controls
+            </p>
+          </div>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => open(null)}>Add Item</Button>
+        <button
+          onClick={() => open(null)}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-teal-600 hover:bg-teal-700 active:bg-teal-800 text-white rounded-xl shadow-xs text-sm font-semibold transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+        >
+          <Plus className="w-4 h-4" />
+          Add Item
+        </button>
       </div>
 
-      <div className="flex flex-wrap gap-3 mb-4">
-        <Input
-          allowClear
-          prefix={<SearchOutlined />}
-          placeholder="Search by name or code…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          style={{ maxWidth: 320 }}
-        />
-        <Select
-          allowClear
-          placeholder="All types"
-          value={typeFilter}
-          onChange={setTypeFilter}
-          options={ITEM_TYPES.map((t) => ({ value: t.value, label: t.label }))}
-          style={{ minWidth: 180 }}
-        />
-      </div>
+      {/* Main Content Area */}
+      <div className="p-6 max-w-7xl mx-auto w-full flex-1 flex flex-col gap-6">
+        {/* KPI Stats Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Total Catalog Items</span>
+              <div className="p-2 bg-teal-50 dark:bg-teal-950/50 rounded-lg text-teal-600 dark:text-teal-400">
+                <Package className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="text-2xl font-bold text-slate-900 dark:text-white mt-2">{items.length}</div>
+            <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">Configured items & parts</div>
+          </div>
 
-      <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
-        <Table
-          dataSource={items}
-          columns={columns}
-          rowKey="id"
-          loading={loading}
-          pagination={{ pageSize: 20, hideOnSinglePage: true }}
-          locale={{ emptyText: 'No items yet.' }}
-        />
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Active SKUs</span>
+              <div className="p-2 bg-emerald-50 dark:bg-emerald-950/50 rounded-lg text-emerald-600 dark:text-emerald-400">
+                <CheckCircle2 className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-2">{activeCount}</div>
+            <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">Eligible for transaction posting</div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Raw Materials</span>
+              <div className="p-2 bg-blue-50 dark:bg-blue-950/50 rounded-lg text-blue-600 dark:text-blue-400">
+                <Boxes className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-2">{rawCount}</div>
+            <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">Procurement inputs</div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Finished Goods</span>
+              <div className="p-2 bg-amber-50 dark:bg-amber-950/50 rounded-lg text-amber-600 dark:text-amber-400">
+                <Factory className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="text-2xl font-bold text-amber-600 dark:text-amber-400 mt-2">{fgCount}</div>
+            <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">Manufactured & commercial sale</div>
+          </div>
+        </div>
+
+        {/* Floating Filter Card */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3 transition-colors">
+          <div className="relative flex-1 w-full">
+            <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400 dark:text-slate-500" />
+            <input
+              type="text"
+              placeholder="Search by item name, SKU code, or barcode..."
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              className="w-full pl-9 pr-4 py-2 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 text-slate-900 dark:text-white placeholder-slate-400 transition-colors"
+            />
+          </div>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <Select
+              allowClear
+              placeholder="All Item Types"
+              value={typeFilter}
+              onChange={setTypeFilter}
+              options={ITEM_TYPES.map((t) => ({ value: t.value, label: t.label }))}
+              style={{ minWidth: 180 }}
+            />
+          </div>
+        </div>
+
+        {/* Table Container Card */}
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden transition-colors">
+          <div className="p-4 border-b border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900 dark:text-white">Item Catalog Registry</h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">All master SKUs and pricing definitions</p>
+            </div>
+            <span className="text-xs px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-medium">
+              {items.length} Records
+            </span>
+          </div>
+          <Table
+            dataSource={items}
+            columns={columns}
+            rowKey="id"
+            loading={loading}
+            pagination={{ pageSize: 20, hideOnSinglePage: true }}
+            locale={{ emptyText: 'No items yet.' }}
+          />
+        </div>
       </div>
 
       <Drawer
@@ -399,6 +490,23 @@ export function ItemsPage() {
                       <Col span={8}>
                         <Form.Item name="isQcRequired" label="QC Required" valuePropName="checked" extra="Mandates inspection before stock release">
                           <Switch disabled={isService} />
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                    <Row gutter={16} className="p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-100 dark:border-slate-800 mb-4">
+                      <Col span={8}>
+                        <Form.Item name="isCatchWeight" label="Catch-Weight Dual UOM" valuePropName="checked" extra="For items where weight varies per piece">
+                          <Switch disabled={isService} />
+                        </Form.Item>
+                      </Col>
+                      <Col span={8}>
+                        <Form.Item name="secondaryUom" label="Secondary UOM (Weight / Measure)">
+                          <Select allowClear showSearch optionFilterProp="label" options={uomOptions} placeholder="e.g. KG, MT, LTR" />
+                        </Form.Item>
+                      </Col>
+                      <Col span={8}>
+                        <Form.Item name="catchWeightTolerancePct" label="Weight Tolerance (±%)" extra="Max allowed deviation from nominal">
+                          <InputNumber min={0} max={100} precision={2} style={{ width: '100%' }} />
                         </Form.Item>
                       </Col>
                     </Row>

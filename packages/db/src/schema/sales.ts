@@ -1,6 +1,6 @@
 import {
   pgTable, uuid, varchar, text, integer, bigint, boolean,
-  timestamp, date, numeric, jsonb, index, unique, pgEnum,
+  timestamp, date, numeric, jsonb, index, unique, uniqueIndex, pgEnum,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { companies, plants, warehouses } from './company.js';
@@ -145,6 +145,8 @@ export const customers = pgTable(
     /** Preferred logistics / transport partner */
     preferredTransporter: varchar('preferred_transporter', { length: 255 }),
     paymentTermsDays: integer('payment_terms_days').default(0).notNull(),
+    /** Minimum required shelf life in days before batch expiry */
+    minShelfLifeDays: integer('min_shelf_life_days').default(0).notNull(),
     /** Grace period in days before overdue credit-hold triggers */
     gracePeriodDays: integer('grace_period_days').default(0).notNull(),
     /** Credit limit in paise. AR outstanding is checked against this at SO approval. */
@@ -153,6 +155,8 @@ export const customers = pgTable(
     creditHold: boolean('credit_hold').default(false).notNull(),
     defaultCurrency: varchar('default_currency', { length: 3 }).default('INR').notNull(),
     defaultDiscountPercent: numeric('default_discount_percent', { precision: 5, scale: 2 }).default('0').notNull(),
+    /** Directly-assigned sales price list (highest-priority in price resolution) */
+    priceListId: uuid('price_list_id').references(() => priceLists.id),
 
     // ── TCS (tax collected at source on sales) ────────────────────────────
     tcsApplicable: boolean('tcs_applicable').default(false).notNull(),
@@ -231,6 +235,8 @@ export const salesQuotations = pgTable(
     customerId: uuid('customer_id').notNull().references(() => customers.id),
     billingAddressId: uuid('billing_address_id').references(() => customerAddresses.id),
     shippingAddressId: uuid('shipping_address_id').references(() => customerAddresses.id),
+    /** GAP 8: Project Accounting tag */
+    projectId: uuid('project_id'),
 
     validUntilDate: date('valid_until_date'),
     placeOfSupply: varchar('place_of_supply', { length: 2 }),
@@ -259,6 +265,9 @@ export const salesQuotationLines = pgTable(
     description: text('description'),
     quantity: qty('quantity').notNull(),
     uom: varchar('uom', { length: 20 }).notNull(),
+    /** GAP 6: Catch-Weight Dual UOM */
+    secondaryQty: qty('secondary_qty'),
+    secondaryUom: varchar('secondary_uom', { length: 20 }),
 
     ratePaise: money('rate_paise').notNull(),          // selling price
     discountPercent: numeric('discount_percent', { precision: 5, scale: 2 }).default('0').notNull(),
@@ -298,6 +307,8 @@ export const salesOrders = pgTable(
     quotationId: uuid('quotation_id').references(() => salesQuotations.id),
     billingAddressId: uuid('billing_address_id').references(() => customerAddresses.id),
     shippingAddressId: uuid('shipping_address_id').references(() => customerAddresses.id),
+    /** GAP 8: Project Accounting tag */
+    projectId: uuid('project_id'),
 
     /** Customer's own PO reference */
     customerPoNumber: varchar('customer_po_number', { length: 50 }),
@@ -383,6 +394,8 @@ export const deliveryNotes = pgTable(
     /** Dispatching warehouse (line may override) */
     warehouseId: uuid('warehouse_id').notNull().references(() => warehouses.id),
     shippingAddressId: uuid('shipping_address_id').references(() => customerAddresses.id),
+    /** GAP 8: Project Accounting tag */
+    projectId: uuid('project_id'),
 
     // ── Transport / e-way bill ────────────────────────────────────────────
     transporterName: varchar('transporter_name', { length: 255 }),
@@ -420,6 +433,9 @@ export const deliveryNoteLines = pgTable(
     description: text('description'),
     deliveredQty: qty('delivered_qty').notNull(),
     uom: varchar('uom', { length: 20 }).notNull(),
+    /** GAP 6: Catch-Weight Dual UOM */
+    secondaryQty: qty('secondary_qty'),
+    secondaryUom: varchar('secondary_uom', { length: 20 }),
 
     ratePaise: money('rate_paise').notNull(),            // selling price (for invoice reference)
     /** Per-unit COGS = WAC snapshot at dispatch (cost going OUT) */
@@ -467,6 +483,8 @@ export const salesInvoices = pgTable(
     deliveryId: uuid('delivery_id').references(() => deliveryNotes.id),
     billingAddressId: uuid('billing_address_id').references(() => customerAddresses.id),
     shippingAddressId: uuid('shipping_address_id').references(() => customerAddresses.id),
+    /** GAP 8: Project Accounting tag */
+    projectId: uuid('project_id'),
 
     dueDate: date('due_date'),
     placeOfSupply: varchar('place_of_supply', { length: 2 }),
@@ -516,6 +534,9 @@ export const salesInvoiceLines = pgTable(
     description: text('description'),
     quantity: qty('quantity').notNull(),
     uom: varchar('uom', { length: 20 }).notNull(),
+    /** GAP 6: Catch-Weight Dual UOM */
+    secondaryQty: qty('secondary_qty'),
+    secondaryUom: varchar('secondary_uom', { length: 20 }),
 
     ratePaise: money('rate_paise').notNull(),
     discountPaise: money('discount_paise').default(0).notNull(),
@@ -598,6 +619,155 @@ export const salesReceiptAllocations = pgTable(
   })
 );
 
+// ─── 7. Sales Return (RMA / Inward Return from Customer) ─────────────────────
+
+export const salesReturns = pgTable(
+  'sales_returns',
+  {
+    ...documentHeader('sales.return'),
+    customerId: uuid('customer_id').notNull().references(() => customers.id),
+    /** Optional original delivery note this return is against */
+    deliveryId: uuid('delivery_id').references(() => deliveryNotes.id),
+    /** Optional original sales invoice this return is against */
+    invoiceId: uuid('invoice_id').references(() => salesInvoices.id),
+    warehouseId: uuid('warehouse_id').notNull().references(() => warehouses.id),
+
+    reason: text('reason'),
+    /** COGS reversal GL entry created when the sales return is approved */
+    journalEntryId: uuid('journal_entry_id').references(() => journalEntries.id),
+  },
+  (t) => ({
+    uniqueNumber: unique('sales_returns_number_uq').on(t.companyId, t.documentNumber),
+    companyDateIdx: index('sales_returns_company_date_idx').on(t.companyId, t.postingDate),
+    customerIdx: index('sales_returns_customer_idx').on(t.customerId),
+    deliveryIdx: index('sales_returns_delivery_idx').on(t.deliveryId),
+    invoiceIdx: index('sales_returns_invoice_idx').on(t.invoiceId),
+  })
+);
+
+export const salesReturnLines = pgTable(
+  'sales_return_lines',
+  {
+    id: uuid('id').default(sql`gen_random_uuid()`).primaryKey(),
+    returnId: uuid('return_id')
+      .notNull()
+      .references(() => salesReturns.id, { onDelete: 'cascade' }),
+    lineNumber: integer('line_number').notNull(),
+
+    /** Trace back to original delivery line or invoice line */
+    deliveryLineId: uuid('delivery_line_id').references(() => deliveryNoteLines.id),
+    invoiceLineId: uuid('invoice_line_id').references(() => salesInvoiceLines.id),
+
+    itemId: uuid('item_id').notNull().references(() => items.id),
+    description: text('description'),
+    returnedQty: qty('returned_qty').notNull(),
+    uom: varchar('uom', { length: 20 }).notNull(),
+
+    ratePaise: money('rate_paise').notNull(),
+    /** Unit COGS at which the item is taken back into inventory */
+    cogsRatePaise: money('cogs_rate_paise').default(0).notNull(),
+    cogsAmountPaise: money('cogs_amount_paise').default(0).notNull(),
+
+    discountPercent: numeric('discount_percent', { precision: 5, scale: 2 }).default('0').notNull(),
+    discountPaise: money('discount_paise').default(0).notNull(),
+    netAmountPaise: money('net_amount_paise').notNull(),
+
+    taxCodeId: uuid('tax_code_id').references(() => taxCodes.id),
+    hsnSacCode: varchar('hsn_sac_code', { length: 20 }),
+    cgstAmountPaise: money('cgst_amount_paise').default(0).notNull(),
+    sgstAmountPaise: money('sgst_amount_paise').default(0).notNull(),
+    igstAmountPaise: money('igst_amount_paise').default(0).notNull(),
+    cessAmountPaise: money('cess_amount_paise').default(0).notNull(),
+    taxAmountPaise: money('tax_amount_paise').default(0).notNull(),
+    totalAmountPaise: money('total_amount_paise').notNull(),
+
+    warehouseId: uuid('warehouse_id').references(() => warehouses.id),
+    batchId: uuid('batch_id').references(() => itemBatches.id),
+    batchNumber: varchar('batch_number', { length: 100 }),
+    custom_data: jsonb('custom_data').$type<Record<string, unknown>>().default({}),
+  },
+  (t) => ({
+    returnIdx: index('sales_ret_lines_return_idx').on(t.returnId),
+    itemIdx: index('sales_ret_lines_item_idx').on(t.itemId),
+    deliveryLineIdx: index('sales_ret_lines_dn_line_idx').on(t.deliveryLineId),
+    invoiceLineIdx: index('sales_ret_lines_inv_line_idx').on(t.invoiceLineId),
+    batchIdx: index('sales_ret_lines_batch_idx').on(t.batchId),
+  })
+);
+
+// ─── 8. Sales Credit Note (Accounts Receivable & Tax Reversal) ────────────────
+
+export const salesCreditNotes = pgTable(
+  'sales_credit_notes',
+  {
+    ...documentHeader('sales.credit_note'),
+    customerId: uuid('customer_id').notNull().references(() => customers.id),
+    /** Original sales invoice being credited */
+    invoiceId: uuid('invoice_id').references(() => salesInvoices.id),
+    /** Linked sales return (if credit note is against physical return) */
+    returnId: uuid('return_id').references(() => salesReturns.id),
+
+    reason: text('reason'),
+    einvoiceStatus: varchar('einvoice_status', { length: 20 }).default('not_applicable'),
+    irn: varchar('irn', { length: 64 }),
+    qrCodePayload: text('qr_code_payload'),
+
+    /** GL entry created when the credit note is approved (DR Revenue + Tax / CR AR) */
+    journalEntryId: uuid('journal_entry_id').references(() => journalEntries.id),
+  },
+  (t) => ({
+    uniqueNumber: unique('sales_credit_notes_number_uq').on(t.companyId, t.documentNumber),
+    companyDateIdx: index('sales_credit_notes_company_date_idx').on(t.companyId, t.postingDate),
+    customerIdx: index('sales_credit_notes_customer_idx').on(t.customerId),
+    invoiceIdx: index('sales_credit_notes_invoice_idx').on(t.invoiceId),
+    returnIdx: index('sales_credit_notes_return_idx').on(t.returnId),
+  })
+);
+
+export const salesCreditNoteLines = pgTable(
+  'sales_credit_note_lines',
+  {
+    id: uuid('id').default(sql`gen_random_uuid()`).primaryKey(),
+    creditNoteId: uuid('credit_note_id')
+      .notNull()
+      .references(() => salesCreditNotes.id, { onDelete: 'cascade' }),
+    lineNumber: integer('line_number').notNull(),
+
+    invoiceLineId: uuid('invoice_line_id').references(() => salesInvoiceLines.id),
+    returnLineId: uuid('return_line_id').references(() => salesReturnLines.id),
+
+    itemId: uuid('item_id').notNull().references(() => items.id),
+    description: text('description'),
+    quantity: qty('quantity').notNull(),
+    uom: varchar('uom', { length: 20 }).notNull(),
+    /** GAP 6: Catch-Weight Dual UOM */
+    secondaryQty: qty('secondary_qty'),
+    secondaryUom: varchar('secondary_uom', { length: 20 }),
+
+    ratePaise: money('rate_paise').notNull(),
+    discountPercent: numeric('discount_percent', { precision: 5, scale: 2 }).default('0').notNull(),
+    discountPaise: money('discount_paise').default(0).notNull(),
+    netAmountPaise: money('net_amount_paise').notNull(),
+
+    taxCodeId: uuid('tax_code_id').references(() => taxCodes.id),
+    hsnSacCode: varchar('hsn_sac_code', { length: 20 }),
+    cgstAmountPaise: money('cgst_amount_paise').default(0).notNull(),
+    sgstAmountPaise: money('sgst_amount_paise').default(0).notNull(),
+    igstAmountPaise: money('igst_amount_paise').default(0).notNull(),
+    cessAmountPaise: money('cess_amount_paise').default(0).notNull(),
+    taxAmountPaise: money('tax_amount_paise').default(0).notNull(),
+    totalAmountPaise: money('total_amount_paise').notNull(),
+
+    custom_data: jsonb('custom_data').$type<Record<string, unknown>>().default({}),
+  },
+  (t) => ({
+    creditNoteIdx: index('sales_cn_lines_cn_idx').on(t.creditNoteId),
+    itemIdx: index('sales_cn_lines_item_idx').on(t.itemId),
+    invoiceLineIdx: index('sales_cn_lines_inv_line_idx').on(t.invoiceLineId),
+    returnLineIdx: index('sales_cn_lines_ret_line_idx').on(t.returnLineId),
+  })
+);
+
 // ─── Drizzle inference types ───────────────────────────────────────────────
 
 export type Customer = typeof customers.$inferSelect;
@@ -629,3 +799,86 @@ export type SalesReceipt = typeof salesReceipts.$inferSelect;
 export type NewSalesReceipt = typeof salesReceipts.$inferInsert;
 export type SalesReceiptAllocation = typeof salesReceiptAllocations.$inferSelect;
 export type NewSalesReceiptAllocation = typeof salesReceiptAllocations.$inferInsert;
+
+export type SalesReturn = typeof salesReturns.$inferSelect;
+export type NewSalesReturn = typeof salesReturns.$inferInsert;
+export type SalesReturnLine = typeof salesReturnLines.$inferSelect;
+export type NewSalesReturnLine = typeof salesReturnLines.$inferInsert;
+
+export type SalesCreditNote = typeof salesCreditNotes.$inferSelect;
+export type NewSalesCreditNote = typeof salesCreditNotes.$inferInsert;
+export type SalesCreditNoteLine = typeof salesCreditNoteLines.$inferSelect;
+export type NewSalesCreditNoteLine = typeof salesCreditNoteLines.$inferInsert;
+
+// ─── Price lists ─────────────────────────────────────────────────────────
+//
+// A price list groups per-item sell prices for a company. Each price_list_items
+// row is one quantity-break tier (minQty) for an item, so multiple rows per
+// (list, item) form a qty ladder. PricingService resolves a customer's applicable
+// list (direct assignment → tier-tagged → company default), then the best qty tier.
+
+export const priceLists = pgTable(
+  'price_lists',
+  {
+    id: uuid('id').default(sql`gen_random_uuid()`).primaryKey(),
+    companyId: uuid('company_id').notNull().references(() => companies.id),
+
+    code: varchar('code', { length: 30 }).notNull(),
+    name: varchar('name', { length: 255 }).notNull(),
+    /** 'sales' for now — leaves room for 'purchase' later */
+    kind: varchar('kind', { length: 20 }).default('sales').notNull(),
+    currency: varchar('currency', { length: 3 }).default('INR').notNull(),
+
+    /** The fallback list used when a customer has no direct/tier-matched list */
+    isDefault: boolean('is_default').default(false).notNull(),
+    /** If set, auto-applies to customers whose customerTier matches this value */
+    appliesToTier: varchar('applies_to_tier', { length: 50 }),
+
+    validFrom: date('valid_from'),
+    validTo: date('valid_to'),
+
+    isActive: boolean('is_active').default(true).notNull(),
+    createdBy: uuid('created_by').references(() => users.id),
+    updatedBy: uuid('updated_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    uniqueCode: unique('price_lists_company_code_uq').on(t.companyId, t.code),
+    companyIdx: index('price_lists_company_idx').on(t.companyId),
+    // At most one default sales list per company.
+    defaultUq: uniqueIndex('price_lists_company_default_uq').on(t.companyId).where(sql`is_default = true AND kind = 'sales'`),
+  })
+);
+
+export const priceListItems = pgTable(
+  'price_list_items',
+  {
+    id: uuid('id').default(sql`gen_random_uuid()`).primaryKey(),
+    companyId: uuid('company_id').notNull().references(() => companies.id),
+    priceListId: uuid('price_list_id').notNull().references(() => priceLists.id, { onDelete: 'cascade' }),
+    itemId: uuid('item_id').notNull().references(() => items.id),
+
+    /** Quantity-break threshold: this price applies when line qty >= minQty */
+    minQty: numeric('min_qty', { precision: 18, scale: 4 }).default('1').notNull(),
+    unitPricePaise: integer('unit_price_paise').default(0).notNull(),
+    /** Optional line-level default discount for this tier */
+    discountPercent: numeric('discount_percent', { precision: 5, scale: 2 }).default('0').notNull(),
+    uom: varchar('uom', { length: 20 }),
+
+    validFrom: date('valid_from'),
+    validTo: date('valid_to'),
+    isActive: boolean('is_active').default(true).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    tierUq: unique('price_list_items_tier_uq').on(t.companyId, t.priceListId, t.itemId, t.minQty),
+    listItemIdx: index('price_list_items_list_item_idx').on(t.priceListId, t.itemId),
+  })
+);
+
+export type PriceList = typeof priceLists.$inferSelect;
+export type NewPriceList = typeof priceLists.$inferInsert;
+export type PriceListItem = typeof priceListItems.$inferSelect;
+export type NewPriceListItem = typeof priceListItems.$inferInsert;

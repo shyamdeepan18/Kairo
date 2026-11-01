@@ -15,6 +15,7 @@ import type { ValuationEngine } from '../services/valuation-engine.js';
 import type { UomService } from '../services/uom-service.js';
 import type { ApprovalEngine } from '../services/approval-engine.js';
 import type { LicenseService } from '../services/license-service.js';
+import type { PricingService } from '../services/pricing-service.js';
 import type { TenantContext } from '../middleware/tenant-context.js';
 
 // Extend JWT payload so request.user is typed everywhere
@@ -81,5 +82,8 @@ declare module 'fastify' {
     // Permission roadmap item 2 — approval workflows + licensing
     approvalEngine: ApprovalEngine;
     licenseService: LicenseService;
+
+    // Section B — sales price-list / pricing engine
+    pricingService: PricingService;
   }
 }

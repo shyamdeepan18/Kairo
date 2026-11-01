@@ -130,6 +130,127 @@ export const purchaseInvoiceTemplate: PostingTemplateFn = (ctx, accountMap) => {
   return lines;
 };
 
+// ─── purchase.debit_note ──────────────────────────────────────────────────
+//
+// Debit note issued to supplier (reverses purchase invoice / reduces AP).
+//
+//   DR Accounts Payable (supplier)   (total amount incl. tax)
+//   CR GR/IR Clearing / Purchases    (net amount)
+//   CR GR/IR Tax Clearing / Input Tax (tax amounts)
+//
+export const purchaseReturnTemplate: PostingTemplateFn = (ctx, accountMap) => {
+  const totalNetPaise = ctx.lines.reduce((s, l) => s + (l.lineAmountPaise as number), 0);
+  const clearingCategory = accountMap.has('grn_clearing') ? 'grn_clearing' : 'purchases';
+  const inventoryCategory = accountMap.has('inventory_raw_material') ? 'inventory_raw_material' : 'inventory_finished';
+
+  return [
+    {
+      accountCategory: clearingCategory,
+      debitPaise: totalNetPaise,
+      creditPaise: 0,
+      narration: `Return to Vendor: ${ctx.documentNumber}`,
+    },
+    {
+      accountCategory: inventoryCategory,
+      debitPaise: 0,
+      creditPaise: totalNetPaise,
+      narration: `Inventory Out: ${ctx.documentNumber}`,
+    },
+  ];
+};
+
+export const purchaseDebitNoteTemplate: PostingTemplateFn = (ctx, accountMap) => {
+  const totalNetPaise = ctx.lines.reduce((s, l) => s + (l.lineAmountPaise as number), 0);
+  const gst = extractGst(ctx);
+  const totalDebitNotePaise = totalNetPaise + gst.total;
+  const supplierId = ctx.header.supplierId as string;
+
+  const lines: RawJournalLine[] = [
+    {
+      accountCategory: 'accounts_payable',
+      debitPaise: totalDebitNotePaise,
+      creditPaise: 0,
+      partyType: 'supplier',
+      partyId: supplierId,
+      narration: `Debit Note: ${ctx.documentNumber}`,
+    },
+    {
+      accountCategory: accountMap.has('grn_clearing') ? 'grn_clearing' : 'purchases',
+      debitPaise: 0,
+      creditPaise: totalNetPaise,
+      narration: `Debit Note Reversal: ${ctx.documentNumber}`,
+    },
+  ];
+
+  if (gst.total > 0) {
+    const taxCat = accountMap.has('grn_tax_clearing') ? 'grn_tax_clearing' : 'input_cgst';
+    lines.push({
+      accountCategory: taxCat,
+      debitPaise: 0,
+      creditPaise: gst.total,
+    });
+  }
+
+  return lines;
+};
+
+// ─── purchase.lcv (GAP 3) ──────────────────────────────────────────────────
+//
+// Landed Cost Voucher: Apportions freight, customs, handling into inventory.
+//
+//   DR Inventory (Raw / Finished)    (portion absorbed on on-hand stock)
+//   DR COGS Variance                 (portion written off if stock already zero)
+//   CR Freight / Clearing Account    (or specific expense accounts)
+
+export const purchaseLcvTemplate: PostingTemplateFn = (ctx, accountMap) => {
+  const lines: RawJournalLine[] = [];
+  const absorbedPaise = (ctx.header.absorbedPaise as number) ?? 0;
+  const cogsVariancePaise = (ctx.header.cogsVariancePaise as number) ?? 0;
+  const expenseLines = (ctx.header.expenseLines as Array<{ accountId: string; amountPaise: number; description?: string }>) ?? [];
+
+  if (absorbedPaise > 0) {
+    const invCat = accountMap.has('inventory_raw_material') ? 'inventory_raw_material' : 'inventory_finished';
+    lines.push({
+      accountCategory: invCat,
+      debitPaise: absorbedPaise,
+      creditPaise: 0,
+      narration: `LCV Landed Cost Absorbed: ${ctx.documentNumber}`,
+    });
+  }
+
+  if (cogsVariancePaise > 0) {
+    const cogsCat = accountMap.has('landed_cost_variance') ? 'landed_cost_variance' : 'cogs';
+    lines.push({
+      accountCategory: cogsCat,
+      debitPaise: cogsVariancePaise,
+      creditPaise: 0,
+      narration: `LCV Landed Cost Variance (Zero Stock): ${ctx.documentNumber}`,
+    });
+  }
+
+  if (expenseLines.length > 0) {
+    for (const exp of expenseLines) {
+      lines.push({
+        accountId: exp.accountId,
+        debitPaise: 0,
+        creditPaise: exp.amountPaise,
+        narration: `LCV Expense: ${exp.description || ctx.documentNumber}`,
+      });
+    }
+  } else {
+    const totalCharges = absorbedPaise + cogsVariancePaise;
+    const freightCat = accountMap.has('freight_clearing') ? 'freight_clearing' : 'grn_clearing';
+    lines.push({
+      accountCategory: freightCat,
+      debitPaise: 0,
+      creditPaise: totalCharges,
+      narration: `LCV Total Charges: ${ctx.documentNumber}`,
+    });
+  }
+
+  return lines;
+};
+
 // ─── purchase.payment ─────────────────────────────────────────────────────
 //
 // Payment made to a supplier — reduces the AP balance.
@@ -589,7 +710,32 @@ export const subconIssueTemplate: PostingTemplateFn = (ctx, accountMap) => {
 
 export const subconReceiptTemplate: PostingTemplateFn = (ctx, accountMap) => {
   const value = (ctx.header.totalValuePaise as number) || 0;
+  const rawMaterialValue = (ctx.header.rawMaterialValuePaise as number) || value;
+  const serviceChargeValue = (ctx.header.serviceChargePaise as number) || 0;
   const inventoryCategory = (ctx.header.inventoryCategory as string) ?? 'inventory_finished';
+
+  if (serviceChargeValue > 0) {
+    return [
+      {
+        accountCategory: inventoryCategory as Parameters<typeof accountMap.resolve>[0],
+        debitPaise: value,
+        creditPaise: 0,
+        narration: `Subcon receipt: ${ctx.documentNumber}`,
+      },
+      {
+        accountCategory: 'inventory_wip',
+        debitPaise: 0,
+        creditPaise: rawMaterialValue,
+        narration: `WIP consumption`,
+      },
+      {
+        accountCategory: 'accounts_payable',
+        debitPaise: 0,
+        creditPaise: serviceChargeValue,
+        narration: `Subcontractor service fee`,
+      },
+    ];
+  }
 
   return [
     {
@@ -612,6 +758,9 @@ export const BUILT_IN_TEMPLATES: Record<string, PostingTemplateFn> = {
   'purchase.grn':             purchaseGrnTemplate,
   'purchase.invoice':         purchaseInvoiceTemplate,
   'purchase.payment':         purchasePaymentTemplate,
+  'purchase.debit_note':      purchaseDebitNoteTemplate,
+  'purchase.return':          purchaseReturnTemplate,
+  'purchase.lcv':             purchaseLcvTemplate,
   // Sales
   'sales.invoice':            salesInvoiceTemplate,
   'sales.payment':            salesPaymentTemplate,

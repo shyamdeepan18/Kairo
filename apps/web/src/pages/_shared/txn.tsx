@@ -26,6 +26,11 @@ export interface DraftLine {
   grnLineId?: string;
   quotationLineId?: string;
   soLineId?: string;
+  deliveryLineId?: string;
+  secondaryQty?: number;
+  secondaryUom?: string;
+  batchId?: string;
+  batchNumber?: string;
 }
 
 let seq = 1;
@@ -42,6 +47,12 @@ export interface RefItem {
   standardCostPaise?: number;
   minSellingPricePaise?: number;
   barcode?: string | null;
+  secondaryUom?: string | null;
+  conversionFactor?: string | number | null;
+  isCatchWeight?: boolean;
+  catchWeightTolerancePct?: string | number;
+  shelfLifeDays?: number;
+  trackingType?: string;
 }
 export interface RefTax { id: string; code: string; gstRateBp: number }
 
@@ -183,9 +194,34 @@ export function LinesEditor({ lines, onChange, items, taxCodes, showTax = true, 
                         </Tag>
                       </div>
                     )}
+                    {l.batchNumber && (
+                      <div className="mt-1">
+                        <Tag color="purple" style={{ fontSize: 10, borderRadius: 8, margin: 0 }}>
+                          FEFO Batch: {l.batchNumber}
+                        </Tag>
+                      </div>
+                    )}
+                    {it?.isCatchWeight && (
+                      <div className="mt-1">
+                        <Tag color="cyan" style={{ fontSize: 10, borderRadius: 8, margin: 0 }}>
+                          Catch-Weight: ±{it.catchWeightTolerancePct || 0}%
+                        </Tag>
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-2">
                     <InputNumber min={0} value={l.quantity} onChange={(v) => set(l.key, { quantity: Number(v) || 0 })} style={{ width: '100%' }} />
+                    {it?.isCatchWeight && (
+                      <div className="mt-1">
+                        <InputNumber
+                          placeholder={`Weight (${it.secondaryUom || 'KG'})`}
+                          size="small"
+                          value={l.secondaryQty}
+                          onChange={(v) => set(l.key, { secondaryQty: Number(v) || 0, secondaryUom: it.secondaryUom || 'KG' })}
+                          style={{ width: '100%' }}
+                        />
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-2">
                     <Input value={l.uom} onChange={(e) => set(l.key, { uom: e.target.value })} />
@@ -246,5 +282,6 @@ export function pricedLineBody(l: DraftLine, gstBpOf: (id?: string) => number) {
     ratePaise, discountPercent: l.discountPercent || 0, taxCodeId: l.taxCodeId || undefined,
     cgstAmountPaise: c.cgstAmountPaise, sgstAmountPaise: c.sgstAmountPaise,
     poLineId: l.poLineId || undefined, grnLineId: l.grnLineId || undefined, quotationLineId: l.quotationLineId || undefined,
+    soLineId: l.soLineId || undefined, deliveryLineId: l.deliveryLineId || undefined,
   };
 }

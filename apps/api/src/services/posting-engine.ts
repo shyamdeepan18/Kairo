@@ -46,7 +46,8 @@ export interface TaxLine {
 // so templates stay portable across companies.
 
 export interface RawJournalLine {
-  accountCategory: PostingCategory;
+  accountCategory?: PostingCategory;
+  accountId?: string;
   /** Paise. Set one of debitPaise / creditPaise; leave the other 0. */
   debitPaise: number;
   creditPaise: number;
@@ -161,15 +162,19 @@ export class PostingEngine {
     this.assertBalanced(ctx.documentType, rawLines);
 
     // Resolve categories to account IDs now that we know it balances
-    const resolvedLines = rawLines.map((line) => ({
-      accountId: accountMap.resolve(line.accountCategory),
-      debitAmountPaise: line.debitPaise,
-      creditAmountPaise: line.creditPaise,
-      partyType: line.partyType,
-      partyId: line.partyId,
-      narration: line.narration,
-      taxCode: line.taxCode,
-    }));
+    const resolvedLines = rawLines.map((line) => {
+      const accountId = line.accountId ?? (line.accountCategory ? accountMap.resolve(line.accountCategory) : undefined);
+      if (!accountId) throw new Error(`Cannot resolve account for line: ${JSON.stringify(line)}`);
+      return {
+        accountId,
+        debitAmountPaise: line.debitPaise,
+        creditAmountPaise: line.creditPaise,
+        partyType: line.partyType,
+        partyId: line.partyId,
+        narration: line.narration,
+        taxCode: line.taxCode,
+      };
+    });
 
     // Generate entry number atomically
     const entryNumber = await this.numberSeriesService.next(

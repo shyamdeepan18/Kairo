@@ -12,6 +12,10 @@ export function InventoryRoutes() {
       <Route path="ledger"      element={<StockLedgerPage />} />
       <Route path="adjustments" element={<StockAdjustmentsPage />} />
       <Route path="transfers"   element={<StockTransfersPage />} />
+      <Route path="batches"     element={<StockBalancesPage />} />
+      <Route path="serials"     element={<StockBalancesPage />} />
     </Routes>
   );
 }
+
+export default InventoryRoutes;

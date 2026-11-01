@@ -255,6 +255,31 @@ const workflowPutSchema = z.object({
 }).strict();
 
 export default async function settingsRoutes(app: FastifyInstance) {
+  // ── Chart of Accounts Static Alias ──────────────────────────────────────────
+  app.get(
+    '/coa',
+    { preHandler: [app.authenticate, resolveTenantContext, authorize('accounting.coa.view')] },
+    async (req) => {
+      const list = await db
+        .select({
+          id: chartOfAccounts.id,
+          code: chartOfAccounts.code,
+          name: chartOfAccounts.name,
+          accountType: chartOfAccounts.accountType,
+          normalBalance: chartOfAccounts.normalBalance,
+          parentId: chartOfAccounts.parentId,
+          isGroup: chartOfAccounts.isGroup,
+          postingCategory: chartOfAccounts.postingCategory,
+          isSystemAccount: chartOfAccounts.isSystemAccount,
+          isActive: chartOfAccounts.isActive,
+        })
+        .from(chartOfAccounts)
+        .where(eq(chartOfAccounts.companyId, tenant(req).companyId))
+        .orderBy(chartOfAccounts.code);
+      return { accounts: list };
+    }
+  );
+
   // ── Company ────────────────────────────────────────────────────────────────
 
   app.get<{ Params: { companyId: string } }>(

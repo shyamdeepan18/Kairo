@@ -115,6 +115,8 @@ export const warehouses = pgTable('warehouses', {
 }, (t) => ({
   plantIdx: index('warehouses_plant_id_idx').on(t.plantId),
   companyIdx: index('warehouses_company_id_idx').on(t.companyId),
+  // At most one auto-provisioned in-transit warehouse per plant (used by stock transfers).
+  transitUq: uniqueIndex('warehouses_plant_transit_uq').on(t.plantId).where(sql`warehouse_type = 'transit'`),
 }));
 
 // ─── Table: company_settings ──────────────────────────────────────────────────

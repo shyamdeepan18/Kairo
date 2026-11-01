@@ -44,6 +44,7 @@ export type PostingCategory =
   | 'grn_clearing'
   | 'grn_tax_clearing'
   | 'round_off'
+  | 'freight_clearing'
   // ── Revenue ───────────────────────────────────────────────────────────
   | 'sales_revenue'
   | 'service_revenue'
@@ -51,6 +52,7 @@ export type PostingCategory =
   | 'purchases'
   | 'raw_material_consumed'
   | 'cogs'
+  | 'landed_cost_variance'
   // ── Manufacturing / Inventory adjustment ──────────────────────────────
   /** Gain or loss from physical stock count adjustments */
   | 'stock_adjustment'
@@ -224,6 +226,41 @@ export const journalEntries = pgTable(
   })
 );
 
+// ─── Table: projects (GAP 8 Project Accounting & Job Costing) ──────────────
+
+export const projects = pgTable(
+  'projects',
+  {
+    id: uuid('id').default(sql`gen_random_uuid()`).primaryKey(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id, { onDelete: 'cascade' }),
+    code: varchar('code', { length: 50 }).notNull(),
+    name: varchar('name', { length: 255 }).notNull(),
+    description: text('description'),
+    customerId: uuid('customer_id'),
+    contractValuePaise: bigint('contract_value_paise', { mode: 'number' }).notNull().default(0),
+    budgetMaterialPaise: bigint('budget_material_paise', { mode: 'number' }).notNull().default(0),
+    budgetLaborPaise: bigint('budget_labor_paise', { mode: 'number' }).notNull().default(0),
+    budgetSubconPaise: bigint('budget_subcon_paise', { mode: 'number' }).notNull().default(0),
+    budgetOverheadPaise: bigint('budget_overhead_paise', { mode: 'number' }).notNull().default(0),
+    startDate: date('start_date'),
+    endDate: date('end_date'),
+    status: varchar('status', { length: 30 }).default('active').notNull(), // planning | active | on_hold | completed | closed
+    costCentreId: uuid('cost_centre_id'),
+    createdBy: uuid('created_by').references(() => users.id),
+    updatedBy: uuid('updated_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    companyCodeUq: unique('projects_company_code_uq').on(t.companyId, t.code),
+    companyIdx: index('projects_company_idx').on(t.companyId),
+    customerIdx: index('projects_customer_idx').on(t.customerId),
+    statusIdx: index('projects_status_idx').on(t.status),
+  })
+);
+
 // ─── Table: journal_entry_lines ────────────────────────────────────────────
 //
 // One row per debit or credit within a journal entry.
@@ -253,6 +290,8 @@ export const journalEntryLines = pgTable(
 
     /** Future: cost-centre allocation */
     costCentreId: uuid('cost_centre_id'),
+    /** GAP 8: Project Accounting tag */
+    projectId: uuid('project_id').references(() => projects.id),
 
     narration: text('narration'),
 

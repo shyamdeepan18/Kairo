@@ -91,10 +91,14 @@ export class NumberSeriesService {
       // Auto-provision a default series for this document type if missing
       const defaultPrefixes: Record<string, string> = {
         'purchase.requisition': 'PR',
+        'purchase.blanket_po': 'BPO',
         'purchase.po': 'PO',
         'purchase.grn': 'GRN',
+        'purchase.lcv': 'LCV',
         'purchase.invoice': 'PINV',
         'purchase.payment': 'PPAY',
+        'purchase.return': 'PRET',
+        'purchase.debit_note': 'DN',
         'sales.quotation': 'QTN',
         'sales.so': 'SO',
         'sales.delivery': 'DN',

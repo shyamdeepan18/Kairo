@@ -11,7 +11,7 @@ import {
   BankOutlined, TeamOutlined, SafetyOutlined,
   AccountBookOutlined, TagsOutlined, NodeIndexOutlined,
   FieldTimeOutlined, PrinterOutlined, ApiOutlined,
-  EnvironmentOutlined, SafetyCertificateOutlined
+  EnvironmentOutlined, SafetyCertificateOutlined, ReadOutlined
 } from '@ant-design/icons';
 
 const { Text } = Typography;
@@ -28,6 +28,7 @@ const SETTINGS_NAV = [
   { key: '/settings/custom-fields',   label: 'Custom Fields',       icon: <NodeIndexOutlined /> },
   { key: '/settings/print-templates', label: 'Print Templates',     icon: <PrinterOutlined /> },
   { key: '/settings/integrations',    label: 'Integrations',        icon: <ApiOutlined /> },
+  { key: '/settings/user-guide',      label: 'User Guide & Workflows', icon: <ReadOutlined /> },
 ];
 
 export function SettingsLayout() {

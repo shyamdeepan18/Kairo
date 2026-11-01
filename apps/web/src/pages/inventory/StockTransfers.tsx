@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import {
   Table, Button, Drawer, Form, DatePicker, Select, Input, InputNumber,
@@ -8,8 +8,11 @@ import {
 import {
   PlusOutlined, DeleteOutlined, SwapOutlined, CarOutlined,
   CheckCircleOutlined, CloseCircleOutlined, EyeOutlined, SendOutlined,
-  InboxOutlined, ArrowRightOutlined,
+  InboxOutlined, ArrowRightOutlined, EditOutlined, RollbackOutlined, StopOutlined,
 } from '@ant-design/icons';
+import { 
+  ArrowLeftRight, Search as LucideSearch, Truck, Clock, ShieldCheck, DollarSign, Layers, Plus 
+} from 'lucide-react';
 import dayjs from 'dayjs';
 import { usePlantStore } from '../../store/plant';
 import { inventoryApi, invErr } from '../../api/inventory';
@@ -21,12 +24,17 @@ import { useCardStyle, STATUS_OPTIONS } from '../_shared/txn';
 
 const { Title, Text } = Typography;
 
+interface BatchOption { id: string; batchNumber: string; expiryDate: string | null }
+
 interface DraftLine {
   key: number;
   itemId?: string;
   quantity: number;
   uom?: string;
   valuationRatePaise: number;
+  trackingType?: string;
+  batchId?: string;
+  batches?: BatchOption[];
 }
 
 let seq = 1;
@@ -48,6 +56,12 @@ export function StockTransfersPage() {
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
   const [viewRecord, setViewRecord] = useState<any | null>(null);
   const [detailModal, setDetailModal] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  // Receive (partial inward) modal
+  const [receiveRecord, setReceiveRecord] = useState<any | null>(null);
+  const [receiveQty, setReceiveQty] = useState<Record<string, number>>({});
+  const [receiving, setReceiving] = useState(false);
 
   // Watch form fields for dependent warehouse dropdowns
   const selectedFromPlantId = Form.useWatch('fromPlantId', form) ?? plant?.id;
@@ -77,12 +91,25 @@ export function StockTransfersPage() {
 
   const handleItemSelect = (key: number, itemId: string) => {
     const it = items.find((i) => i.id === itemId);
+    if (it?.trackingType === 'serial') {
+      message.warning(`'${it.itemCode}' is serial-tracked and cannot be transferred from this screen yet.`);
+      setLine(key, { itemId: undefined, trackingType: undefined, batchId: undefined, batches: undefined });
+      return;
+    }
     const defaultRate = (it?.purchaseRatePaise ?? 0) / 100;
     setLine(key, {
       itemId,
       uom: it?.primaryUom ?? 'NOS',
       valuationRatePaise: defaultRate,
+      trackingType: it?.trackingType,
+      batchId: undefined,
+      batches: undefined,
     });
+    if (it?.trackingType === 'batch' && company?.id) {
+      inventoryApi.itemBatches(company.id, itemId)
+        .then((batches) => setLine(key, { batches }))
+        .catch(() => setLine(key, { batches: [] }));
+    }
   };
 
   const save = async (v: any) => {
@@ -93,13 +120,17 @@ export function StockTransfersPage() {
     }
     const valid = lines.filter((l) => l.itemId && l.quantity > 0);
     if (!valid.length) { message.error('Add at least one item line'); return; }
+    // Batch-tracked lines must have a batch selected
+    const missingBatch = valid.find((l) => l.trackingType === 'batch' && !l.batchId);
+    if (missingBatch) {
+      const it = items.find((i) => i.id === missingBatch.itemId);
+      message.error(`Select a batch for '${it?.itemCode ?? 'the batch-tracked item'}'`);
+      return;
+    }
 
     setSaving(true);
+    // Plant is derived from the warehouse server-side (A8) — we don't send it.
     const body = {
-      companyId: company.id,
-      fromPlantId: v.fromPlantId || plant?.id,
-      toPlantId: v.toPlantId || plant?.id,
-      plantId: v.fromPlantId || plant?.id,
       fromWarehouseId: v.fromWarehouseId,
       toWarehouseId: v.toWarehouseId,
       postingDate: v.postingDate?.format?.('YYYY-MM-DD') ?? dayjs().format('YYYY-MM-DD'),
@@ -115,13 +146,20 @@ export function StockTransfersPage() {
         quantity: l.quantity,
         uom: l.uom ?? 'NOS',
         valuationRatePaise: Math.round((l.valuationRatePaise || 0) * 100),
+        batchId: l.batchId || undefined,
       })),
     };
 
     try {
-      await inventoryApi.transfers.create(body);
-      message.success('Stock transfer order created in draft state.');
+      if (editingId) {
+        await inventoryApi.transfers.update(editingId, body);
+        message.success('Draft transfer updated.');
+      } else {
+        await inventoryApi.transfers.create(body);
+        message.success('Stock transfer order created in draft state.');
+      }
       setDrawer(false);
+      setEditingId(null);
       load();
     } catch (e) {
       message.error(invErr(e));
@@ -130,24 +168,103 @@ export function StockTransfersPage() {
     }
   };
 
-  const act = async (r: any, action: 'submit' | 'approve' | 'receive' | 'reject') => {
-    if (!company?.id) return;
+  const act = async (r: any, action: 'submit' | 'approve' | 'reject' | 'cancel' | 'reopen' | 'delete') => {
+    if (!company?.id || busyId) return;
+    setBusyId(r.id);
     try {
       if (action === 'submit') await inventoryApi.transfers.submit(r.id, company.id);
       else if (action === 'approve') await inventoryApi.transfers.approve(r.id, company.id);
-      else if (action === 'receive') await inventoryApi.transfers.receive(r.id, company.id);
-      else await inventoryApi.transfers.reject(r.id, company.id);
+      else if (action === 'reject') await inventoryApi.transfers.reject(r.id, company.id);
+      else if (action === 'cancel') await inventoryApi.transfers.cancel(r.id, company.id);
+      else if (action === 'reopen') await inventoryApi.transfers.reopen(r.id, company.id);
+      else await inventoryApi.transfers.remove(r.id, company.id);
 
-      const actionLabels = {
+      const actionLabels: Record<string, string> = {
         submit: 'submitted for approval',
         approve: r.transferType === 'in_transit' ? 'approved & dispatched' : 'approved & posted',
-        receive: 'received & completed',
         reject: 'rejected',
+        cancel: 'cancelled',
+        reopen: 'reopened to draft',
+        delete: 'deleted',
       };
       message.success(`Transfer ${actionLabels[action]}.`);
       load();
     } catch (e) {
       message.error(invErr(e));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const openEdit = async (r: any) => {
+    if (!company?.id) return;
+    try {
+      const data = await inventoryApi.transfers.get(company.id, r.id);
+      setEditingId(data.id);
+      form.resetFields();
+      form.setFieldsValue({
+        transferType: data.transferType,
+        fromPlantId: data.fromPlantId ?? data.plantId,
+        toPlantId: data.toPlantId ?? data.plantId,
+        fromWarehouseId: data.fromWarehouseId,
+        toWarehouseId: data.toWarehouseId,
+        postingDate: data.postingDate ? dayjs(data.postingDate) : dayjs(),
+        vehicleNo: data.vehicleNo, lrNumber: data.lrNumber,
+        driverName: data.driverName, driverPhone: data.driverPhone,
+        reason: data.reason,
+      });
+      setLines((data.lines || []).map((l: any) => {
+        const it = items.find((i) => i.id === l.itemId);
+        const dl: DraftLine = {
+          key: seq++, itemId: l.itemId, quantity: parseFloat(l.quantity),
+          uom: l.uom, valuationRatePaise: (l.valuationRatePaise ?? 0) / 100,
+          trackingType: it?.trackingType, batchId: l.batchId ?? undefined,
+        };
+        if (it?.trackingType === 'batch') {
+          inventoryApi.itemBatches(company.id!, l.itemId).then((batches) => setLine(dl.key, { batches })).catch(() => {});
+        }
+        return dl;
+      }));
+      setDrawer(true);
+    } catch (e) {
+      message.error(invErr(e));
+    }
+  };
+
+  const openReceive = async (r: any) => {
+    if (!company?.id) return;
+    try {
+      const data = await inventoryApi.transfers.get(company.id, r.id);
+      const init: Record<string, number> = {};
+      for (const l of data.lines || []) {
+        const remaining = parseFloat(l.quantity) - parseFloat(l.receivedQty ?? '0');
+        init[l.id] = remaining > 0 ? remaining : 0;
+      }
+      setReceiveQty(init);
+      setReceiveRecord(data);
+    } catch (e) {
+      message.error(invErr(e));
+    }
+  };
+
+  const doReceive = async () => {
+    if (!company?.id || !receiveRecord) return;
+    const payloadLines = (receiveRecord.lines || [])
+      .map((l: any) => ({ lineId: l.id, receivedQty: receiveQty[l.id] ?? 0 }))
+      .filter((x: any) => x.receivedQty > 0);
+    if (!payloadLines.length) { message.error('Enter a received quantity for at least one line'); return; }
+    setReceiving(true);
+    try {
+      const res = await inventoryApi.transfers.receive(receiveRecord.id, { lines: payloadLines });
+      message.success(res.status === 'completed'
+        ? 'Transfer fully received & completed.'
+        : 'Partial receipt posted; transfer remains dispatched.');
+      setReceiveRecord(null);
+      load();
+    } catch (e) {
+      message.error(invErr(e));
+    } finally {
+      setReceiving(false);
     }
   };
 
@@ -241,14 +358,21 @@ export function StockTransfersPage() {
       title: 'Actions',
       key: 'actions',
       align: 'right' as const,
-      width: 220,
-      render: (_: any, r: any) => (
-        <Space size={4}>
+      width: 320,
+      render: (_: any, r: any) => {
+        const busy = busyId === r.id;
+        return (
+        <Space size={2} wrap>
           <Button type="text" size="small" icon={<EyeOutlined />} onClick={() => viewTransfer(r.id)}>
             View
           </Button>
           {r.status === 'draft' && (
-            <Button type="text" size="small" icon={<SendOutlined />} onClick={() => act(r, 'submit')}>
+            <Button type="text" size="small" icon={<EditOutlined />} disabled={busy} onClick={() => openEdit(r)}>
+              Edit
+            </Button>
+          )}
+          {r.status === 'draft' && (
+            <Button type="text" size="small" icon={<SendOutlined />} loading={busy} onClick={() => act(r, 'submit')}>
               Submit
             </Button>
           )}
@@ -258,31 +382,47 @@ export function StockTransfersPage() {
               description="Maker-checker policy applies. Approval posts stock issue immediately."
               onConfirm={() => act(r, 'approve')}
             >
-              <Button type="text" size="small" style={{ color: '#52c41a' }} icon={<CheckCircleOutlined />}>
+              <Button type="text" size="small" style={{ color: '#52c41a' }} icon={<CheckCircleOutlined />} loading={busy}>
                 {r.transferType === 'in_transit' ? 'Dispatch' : 'Approve'}
               </Button>
             </Popconfirm>
           )}
           {r.status === 'submitted' && (
             <Popconfirm title="Reject this transfer order?" onConfirm={() => act(r, 'reject')}>
-              <Button type="text" size="small" danger icon={<CloseCircleOutlined />}>
+              <Button type="text" size="small" danger icon={<CloseCircleOutlined />} disabled={busy}>
                 Reject
               </Button>
             </Popconfirm>
           )}
           {r.status === 'dispatched' && (
+            <Button type="primary" size="small" icon={<InboxOutlined />} disabled={busy} onClick={() => openReceive(r)}>
+              Receive
+            </Button>
+          )}
+          {(r.status === 'draft' || r.status === 'submitted' || r.status === 'dispatched') && (
             <Popconfirm
-              title="Receive inward stock?"
-              description="Confirms arrival and posts stock receipt at destination warehouse."
-              onConfirm={() => act(r, 'receive')}
+              title="Cancel this transfer?"
+              description={r.status === 'dispatched' ? 'Stock still in transit will be returned to the source warehouse.' : undefined}
+              onConfirm={() => act(r, 'cancel')}
             >
-              <Button type="primary" size="small" icon={<InboxOutlined />}>
-                Receive
+              <Button type="text" size="small" danger icon={<StopOutlined />} disabled={busy}>
+                Cancel
               </Button>
             </Popconfirm>
           )}
+          {r.status === 'rejected' && (
+            <Button type="text" size="small" icon={<RollbackOutlined />} loading={busy} onClick={() => act(r, 'reopen')}>
+              Reopen
+            </Button>
+          )}
+          {r.status === 'draft' && (
+            <Popconfirm title="Delete this draft transfer?" onConfirm={() => act(r, 'delete')}>
+              <Button type="text" size="small" danger icon={<DeleteOutlined />} disabled={busy} />
+            </Popconfirm>
+          )}
         </Space>
-      ),
+        );
+      },
     },
   ];
 
@@ -330,6 +470,30 @@ export function StockTransfersPage() {
           onChange={(e) => setLine(r.key, { uom: e.target.value })}
         />
       ),
+    },
+    {
+      title: 'Batch',
+      dataIndex: 'batchId',
+      width: 170,
+      render: (v: string, r: DraftLine) =>
+        r.trackingType === 'batch' ? (
+          <Select
+            size="small"
+            showSearch
+            optionFilterProp="label"
+            placeholder="Select batch..."
+            value={v}
+            style={{ width: '100%' }}
+            onChange={(val) => setLine(r.key, { batchId: val })}
+            options={(r.batches || []).map((b) => ({
+              value: b.id,
+              label: b.batchNumber + (b.expiryDate ? ` (exp ${b.expiryDate})` : ''),
+            }))}
+            notFoundContent="No batches"
+          />
+        ) : (
+          <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
+        ),
     },
     {
       title: 'Unit Rate (₹)',
@@ -382,112 +546,195 @@ export function StockTransfersPage() {
     0
   );
 
+  const [searchQuery, setSearchQuery] = useState('');
+  const filteredRows = useMemo(() => {
+    if (!searchQuery.trim()) return rows;
+    const q = searchQuery.toLowerCase();
+    return rows.filter((r) => {
+      const doc = (r.documentNumber || '').toLowerCase();
+      const fromP = plantName(r.fromPlantId ?? r.plantId).toLowerCase();
+      const toP = plantName(r.toPlantId ?? r.plantId).toLowerCase();
+      const fromW = whName(r.fromWarehouseId).toLowerCase();
+      const toW = whName(r.toWarehouseId).toLowerCase();
+      return doc.includes(q) || fromP.includes(q) || toP.includes(q) || fromW.includes(q) || toW.includes(q);
+    });
+  }, [rows, searchQuery, plants, allWarehouses]);
+
   return (
-    <div>
-      {/* Top Header */}
-      <div style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <Title level={4} style={{ margin: 0, fontWeight: 700 }}>Stock Transfers</Title>
-          <Text type="secondary" style={{ fontSize: 13 }}>
-            Multi-Plant & Inter-Warehouse Stock Routing · Maker-Checker Approval Workflow
-          </Text>
+    <div className="h-full flex flex-col bg-slate-50 dark:bg-slate-950 min-h-screen text-slate-900 dark:text-slate-100 transition-colors">
+      {/* Universal Page Header Bar */}
+      <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0 shadow-xs">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-cyan-50 dark:bg-cyan-950/50 text-cyan-600 dark:text-cyan-400 border border-cyan-100 dark:border-cyan-900/40 rounded-xl">
+            <ArrowLeftRight className="w-6 h-6" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold tracking-wider text-slate-500 dark:text-slate-400 uppercase">Inventory</span>
+              <span className="text-xs text-slate-300 dark:text-slate-700">/</span>
+              <span className="text-xs font-medium text-cyan-600 dark:text-cyan-400">Transfers</span>
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+              Stock Transfers
+            </h1>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Multi-Plant & Inter-Warehouse stock routing with maker-checker approval & in-transit control
+            </p>
+          </div>
         </div>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => {
-            form.resetFields();
-            form.setFieldsValue({
-              postingDate: dayjs(),
-              transferType: 'direct',
-              fromPlantId: plant?.id,
-              toPlantId: plant?.id,
-            });
-            setLines([newLine()]);
-            setDrawer(true);
-          }}
-        >
-          New Transfer Order
-        </Button>
+
+        <div className="flex items-center gap-3">
+          <button 
+            type="button"
+            onClick={() => {
+              setEditingId(null);
+              form.resetFields();
+              form.setFieldsValue({
+                postingDate: dayjs(),
+                transferType: 'direct',
+                fromPlantId: plant?.id,
+                toPlantId: plant?.id,
+              });
+              setLines([newLine()]);
+              setDrawer(true);
+            }}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-700 active:bg-cyan-800 text-white rounded-xl shadow-xs text-sm font-semibold transition-all cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            New Transfer Order
+          </button>
+        </div>
       </div>
 
-      {/* KPI Overview Cards */}
-      <Row gutter={[16, 16]} style={{ marginBottom: 20 }}>
-        <Col xs={12} sm={6}>
-          <Card size="small" style={{ borderRadius: 10 }}>
-            <Statistic title="Total Transfers" value={totalCount} prefix={<SwapOutlined />} />
-          </Card>
-        </Col>
-        <Col xs={12} sm={6}>
-          <Card size="small" style={{ borderRadius: 10 }}>
-            <Statistic
-              title="In-Transit"
-              value={inTransitCount}
-              valueStyle={{ color: '#0958d9' }}
-              prefix={<CarOutlined />}
-            />
-          </Card>
-        </Col>
-        <Col xs={12} sm={6}>
-          <Card size="small" style={{ borderRadius: 10 }}>
-            <Statistic
-              title="Pending Approval"
-              value={pendingCount}
-              valueStyle={{ color: '#d46b08' }}
-              prefix={<SendOutlined />}
-            />
-          </Card>
-        </Col>
-        <Col xs={12} sm={6}>
-          <Card size="small" style={{ borderRadius: 10 }}>
-            <Statistic
-              title="Total Transferred"
-              value={totalValuePaise / 100}
-              precision={2}
-              prefix="₹"
-            />
-          </Card>
-        </Col>
-      </Row>
+      {/* Main Content Area */}
+      <div className="p-6 max-w-7xl mx-auto w-full flex-1 flex flex-col gap-6">
+        {/* KPI Stats Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+              <span className="text-xs font-semibold uppercase tracking-wider">Total Transfers</span>
+              <div className="p-2 bg-cyan-50 dark:bg-cyan-950/60 rounded-xl text-cyan-600 dark:text-cyan-400">
+                <ArrowLeftRight className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="mt-2 text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+              {totalCount}
+            </div>
+            <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Transfer orders issued
+            </div>
+          </div>
 
-      {/* Filters */}
-      <div style={{ marginBottom: 16, display: 'flex', gap: 12, alignItems: 'center' }}>
-        <Select
-          allowClear
-          placeholder="All statuses"
-          value={statusFilter}
-          onChange={setStatusFilter}
-          style={{ minWidth: 180 }}
-          options={STATUS_OPTIONS}
-        />
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+              <span className="text-xs font-semibold uppercase tracking-wider">In-Transit Freight</span>
+              <div className="p-2 bg-blue-50 dark:bg-blue-950/60 rounded-xl text-blue-600 dark:text-blue-400">
+                <Truck className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="mt-2 text-2xl font-bold tracking-tight text-blue-600 dark:text-blue-400">
+              {inTransitCount}
+            </div>
+            <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              2-step shipments in motion
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+              <span className="text-xs font-semibold uppercase tracking-wider">Pending Approvals</span>
+              <div className="p-2 bg-amber-50 dark:bg-amber-950/60 rounded-xl text-amber-600 dark:text-amber-400">
+                <Clock className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="mt-2 text-2xl font-bold tracking-tight text-amber-600 dark:text-amber-400">
+              {pendingCount}
+            </div>
+            <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Awaiting checker release
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+              <span className="text-xs font-semibold uppercase tracking-wider">Total Value Moved</span>
+              <div className="p-2 bg-emerald-50 dark:bg-emerald-950/60 rounded-xl text-emerald-600 dark:text-emerald-400">
+                <DollarSign className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="mt-2 text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+              <AmountDisplay paise={totalValuePaise} />
+            </div>
+            <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Cumulative inventory routed
+            </div>
+          </div>
+        </div>
+
+        {/* Filter Bar */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-xs flex flex-col sm:flex-row gap-3 items-center justify-between">
+          <div className="relative w-full sm:w-80">
+            <LucideSearch className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
+            <input 
+              type="text" 
+              placeholder="Search document, plant, warehouse..." 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-4 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 dark:text-white"
+            />
+          </div>
+          <Select 
+            allowClear 
+            placeholder="All Statuses" 
+            value={statusFilter} 
+            onChange={setStatusFilter} 
+            className="w-44" 
+            options={STATUS_OPTIONS} 
+          />
+        </div>
+
+        {/* Table Container Card */}
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center">
+            <div>
+              <h3 className="font-semibold text-slate-900 dark:text-white">
+                Transfer Order Registry
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Warehouse movements, in-transit shipments, and inter-plant logistics
+              </p>
+            </div>
+            <span className="text-xs font-mono px-2.5 py-1 bg-slate-100 dark:bg-slate-800 rounded-lg text-slate-600 dark:text-slate-400">
+              {filteredRows.length} transfers
+            </span>
+          </div>
+
+          <Table
+            dataSource={filteredRows}
+            columns={columns}
+            rowKey="id"
+            loading={loading}
+            pagination={{ pageSize: 20, hideOnSinglePage: true }}
+            locale={{ emptyText: 'No stock transfers found.' }}
+          />
+        </div>
       </div>
 
-      {/* Main Table */}
-      <div style={cardStyle}>
-        <Table
-          dataSource={rows}
-          columns={columns}
-          rowKey="id"
-          loading={loading}
-          pagination={{ pageSize: 20, hideOnSinglePage: true }}
-          locale={{ emptyText: 'No stock transfers found.' }}
-        />
-      </div>
-
-      {/* Create Transfer Drawer */}
+      {/* Create / Edit Transfer Drawer */}
       <Drawer
-        title="Create Stock Transfer"
+        title={editingId ? 'Edit Stock Transfer (Draft)' : 'Create Stock Transfer'}
         open={drawer}
         onClose={async () => {
           if (await confirmClose(form)) {
             form.resetFields();
+            setEditingId(null);
             setDrawer(false);
           }
         }}
         width={920}
         extra={
           <Button type="primary" loading={saving} onClick={() => form.submit()}>
-            Create Transfer
+            {editingId ? 'Save Changes' : 'Create Transfer'}
           </Button>
         }
       >
@@ -518,6 +765,7 @@ export function StockTransfersPage() {
                     showSearch
                     optionFilterProp="label"
                     placeholder="Select source plant..."
+                    onChange={() => form.setFieldValue('fromWarehouseId', undefined)}
                     options={plants.map((p) => ({ value: p.id, label: `${p.code} — ${p.name}` }))}
                   />
                 </Form.Item>
@@ -536,6 +784,7 @@ export function StockTransfersPage() {
                     showSearch
                     optionFilterProp="label"
                     placeholder="Select destination plant..."
+                    onChange={() => form.setFieldValue('toWarehouseId', undefined)}
                     options={plants.map((p) => ({ value: p.id, label: `${p.code} — ${p.name}` }))}
                   />
                 </Form.Item>
@@ -690,6 +939,80 @@ export function StockTransfersPage() {
               {viewRecord.dispatchedAt && ` · Dispatched at ${new Date(viewRecord.dispatchedAt).toLocaleString()}`}
               {viewRecord.receivedAt && ` · Received at ${new Date(viewRecord.receivedAt).toLocaleString()}`}
             </Text>
+          </div>
+        )}
+      </Modal>
+
+      {/* Receive Inward Modal (supports partial receipts) */}
+      <Modal
+        title={
+          <Space>
+            <span>Receive Inward Stock</span>
+            {receiveRecord && <Tag color="blue">{receiveRecord.documentNumber}</Tag>}
+          </Space>
+        }
+        open={!!receiveRecord}
+        onCancel={() => setReceiveRecord(null)}
+        width={720}
+        okText="Confirm Receipt"
+        confirmLoading={receiving}
+        onOk={doReceive}
+      >
+        {receiveRecord && (
+          <div>
+            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
+              Enter the quantity arriving at {whName(receiveRecord.toWarehouseId)}. Leave a line at 0 to receive it later.
+            </Text>
+            <Table
+              dataSource={receiveRecord.lines || []}
+              rowKey="id"
+              pagination={false}
+              size="small"
+              columns={[
+                {
+                  title: 'Item',
+                  key: 'item',
+                  render: (_: any, l: any) => {
+                    const it = items.find((i) => i.id === l.itemId);
+                    return it ? `${it.itemCode} — ${it.itemName}` : l.itemId;
+                  },
+                },
+                { title: 'Dispatched', dataIndex: 'quantity', width: 100, align: 'right' as const },
+                {
+                  title: 'Received',
+                  key: 'recd',
+                  width: 100,
+                  align: 'right' as const,
+                  render: (_: any, l: any) => parseFloat(l.receivedQty ?? '0'),
+                },
+                {
+                  title: 'Remaining',
+                  key: 'rem',
+                  width: 100,
+                  align: 'right' as const,
+                  render: (_: any, l: any) => parseFloat(l.quantity) - parseFloat(l.receivedQty ?? '0'),
+                },
+                {
+                  title: 'Receive Now',
+                  key: 'recv',
+                  width: 130,
+                  render: (_: any, l: any) => {
+                    const remaining = parseFloat(l.quantity) - parseFloat(l.receivedQty ?? '0');
+                    return (
+                      <InputNumber
+                        size="small"
+                        min={0}
+                        max={remaining}
+                        value={receiveQty[l.id] ?? 0}
+                        style={{ width: '100%' }}
+                        disabled={remaining <= 0}
+                        onChange={(val) => setReceiveQty((q) => ({ ...q, [l.id]: val ?? 0 }))}
+                      />
+                    );
+                  },
+                },
+              ]}
+            />
           </div>
         )}
       </Modal>

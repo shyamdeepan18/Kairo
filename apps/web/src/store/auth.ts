@@ -1,6 +1,21 @@
 import { create } from 'zustand';
 import type { AuthUser } from '@erp/shared';
 import { authApi } from '../api/auth';
+import { usePlantStore } from './plant';
+import { useWorkspaceStore } from './workspace';
+import { usePermissionStore } from './permission';
+
+export function resetAllStores() {
+  try {
+    usePlantStore.getState().clear();
+    useWorkspaceStore.getState().closeAll();
+    usePermissionStore.setState({ permissions: [], isLoading: false });
+    sessionStorage.removeItem('erp-plant');
+    sessionStorage.clear();
+  } catch {
+    // ignore in environments without storage
+  }
+}
 
 interface AuthState {
   user: AuthUser | null;
@@ -22,7 +37,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   setAuth: (user, accessToken) => set({ user, accessToken }),
 
-  clearAuth: () => set({ user: null, accessToken: null }),
+  clearAuth: () => {
+    resetAllStores();
+    set({ user: null, accessToken: null });
+  },
 
   /**
    * Called once on app mount.
@@ -35,17 +53,21 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const { accessToken, user } = await authApi.refresh();
       set({ user, accessToken, isInitialized: true });
     } catch {
+      resetAllStores();
       set({ user: null, accessToken: null, isInitialized: true });
     }
   },
 
   login: async (email, password) => {
+    // Purge any residual company/plant/tab data from a previous session
+    resetAllStores();
     const { accessToken, user } = await authApi.login(email, password);
     set({ user, accessToken });
   },
 
   logout: async () => {
     try { await authApi.logout(); } catch { /* ignore — clear state regardless */ }
+    resetAllStores();
     set({ user: null, accessToken: null });
   },
 }));

@@ -287,7 +287,8 @@ export default async function authRoutes(app: FastifyInstance) {
     '/permissions',
     { preHandler: [app.authenticate] },
     async (request, reply) => {
-      const { companyId, plantId } = request.query;
+      const { companyId } = request.query;
+      const plantId = request.query.plantId ?? (request.user as any)?.activePlantId ?? undefined;
       const user = request.user as any;
 
       if (user?.isSystemAdmin) {

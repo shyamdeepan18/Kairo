@@ -14,4 +14,5 @@ export * from './licensing.js';
 export * from './admin.js';
 export * from './payroll.js';
 export * from './fixed-assets.js';
+export * from './notifications.js';
 

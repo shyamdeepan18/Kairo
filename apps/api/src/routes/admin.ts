@@ -14,8 +14,10 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { db } from '@erp/db';
 import {
   companies, plants, users, roles, userRoles, companyLicense, userRoles as userRolesTable, companyUsers,
-  permissions, rolePermissions, companyModules, documentNumberSeries
+  permissions, rolePermissions, companyModules, documentNumberSeries, warehouses, items, auditLogs,
 } from '@erp/db';
+import { adminStockAdjustmentOverrideSchema, type AdminStockAdjustmentOverrideInput } from '@erp/shared';
+import { fiscalPeriod, type PostingContext } from '../services/posting-engine.js';
 import { eq, and, inArray, desc, sql, getTableColumns, isNull } from 'drizzle-orm';
 import argon2 from 'argon2';
 import { LicenseService } from '../services/license-service.js';
@@ -34,6 +36,90 @@ function randomPassword(len = 10) {
   const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#';
   return Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
 }
+
+export const INDUSTRY_BLUEPRINTS = [
+  {
+    id: 'mfg_minerals',
+    category: 'Category A: Manufacturing',
+    name: 'Limestone & Minerals Processing',
+    description: 'Multi-stage processing (Crushing → Sorting → Packing), weighbridge DC gate entry, bulk & bagged dispatch, WAC roll-up.',
+    modules: ['auth', 'settings', 'purchase', 'sales', 'inventory', 'accounting', 'manufacturing'],
+    features: ['Multi-Stage Routing', 'Landed Freight Capitalization', 'Weighbridge Gate Inward', 'E-Way Bill Integration'],
+    icon: 'Mountain',
+  },
+  {
+    id: 'mfg_food',
+    category: 'Category A: Manufacturing',
+    name: 'Food & Beverage Processing',
+    description: 'Recipe BOM with inputs/by-products, batch/lot tracking, expiry/shelf-life management, hygiene QC checks.',
+    modules: ['auth', 'settings', 'purchase', 'sales', 'inventory', 'accounting', 'manufacturing'],
+    features: ['Batch & Expiry Tracking', 'Recipe Formulation', 'Co-Product / By-Product Accounting', 'QC Gate Inward'],
+    icon: 'Apple',
+  },
+  {
+    id: 'mfg_textiles',
+    category: 'Category A: Manufacturing',
+    name: 'Garments & Apparel Manufacturing',
+    description: 'Cutting, stitching, washing, packing work-centres, fabric consumption roll-ups, size-color variants.',
+    modules: ['auth', 'settings', 'purchase', 'sales', 'inventory', 'accounting', 'manufacturing'],
+    features: ['Work Centre Routing', 'Scrap & Wastage Norms', 'Direct Labour Capitalization', 'Variant Masters'],
+    icon: 'Scissors',
+  },
+  {
+    id: 'mfg_discrete',
+    category: 'Category A: Manufacturing',
+    name: 'Electronics & Discrete Assembly',
+    description: 'Component BOM, discrete production orders, serial number tracking, subcontracting and machine hour rates.',
+    modules: ['auth', 'settings', 'purchase', 'sales', 'inventory', 'accounting', 'manufacturing'],
+    features: ['Serial Number Tracking', 'Machine Run Hours', 'Engineering Change Orders', 'Assembly Work Orders'],
+    icon: 'Cpu',
+  },
+  {
+    id: 'trade_wholesale',
+    category: 'Category B: Trading & Distribution',
+    name: 'Wholesale Distribution & Stockist',
+    description: 'High-volume trading without manufacturing overhead. Credit limit enforcement, multi-warehouse transfer, tiered pricing.',
+    modules: ['auth', 'settings', 'purchase', 'sales', 'inventory', 'accounting'],
+    features: ['Customer Credit Limit Engine', 'Multi-Warehouse Transfers', 'Price Lists & Volume Discounts', 'Delivery Challans'],
+    icon: 'Truck',
+  },
+  {
+    id: 'trade_retail_pos',
+    category: 'Category B: Trading & Distribution',
+    name: 'Retail Counter POS & Micro-Trading',
+    description: 'Single-screen quick counter sales (Zoho Books / Tally style), instant cash/card/UPI receipt, live stock deduction at WAC.',
+    modules: ['auth', 'settings', 'sales', 'inventory', 'accounting'],
+    features: ['Quick Counter Invoicing', 'Split Cash/Card/UPI Settlement', 'Instant Barcode Billing', 'Direct Cash Sales'],
+    icon: 'ShoppingCart',
+  },
+  {
+    id: 'agro_milling',
+    category: 'Category C: Agriculture & Agro-Industry',
+    name: 'Grain, Rice & Flour Milling',
+    description: 'Raw grain inward from mandis/farmers, milling output split (Grade A Rice, Broken Rice, Bran, Husk), bag inventory.',
+    modules: ['auth', 'settings', 'purchase', 'sales', 'inventory', 'accounting', 'manufacturing'],
+    features: ['By-Product & Husk Recovery', 'Bagged & Bulk Tracking', 'Farmer/Mandi Settlement', 'Milling Work Orders'],
+    icon: 'Wheat',
+  },
+  {
+    id: 'infra_contracting',
+    category: 'Category D: Infrastructure & Construction',
+    name: 'Contracting & Infrastructure Projects',
+    description: 'Site-based material delivery, milestone billing, project-specific purchase requisitions, subcontractor billing.',
+    modules: ['auth', 'settings', 'purchase', 'sales', 'inventory', 'accounting'],
+    features: ['Site Delivery DC', 'Milestone Invoicing', 'Material Requisitions', 'Bank Guarantee Tracking'],
+    icon: 'HardHat',
+  },
+  {
+    id: 'service_facility',
+    category: 'Category E: Service-Based Businesses',
+    name: 'Equipment Maintenance & Field Service',
+    description: 'Service invoice billing, consumable spare parts consumption, AMC contracts, labour service items.',
+    modules: ['auth', 'settings', 'sales', 'inventory', 'accounting'],
+    features: ['Service Invoices (No Stock OUT)', 'Spare Parts Consumption', 'Labor Rates', 'Service GST Sac Codes'],
+    icon: 'Wrench',
+  },
+];
 
 export default async function adminRoutes(app: FastifyInstance) {
 
@@ -777,5 +863,246 @@ export default async function adminRoutes(app: FastifyInstance) {
       logs, 
       total 
     };
+  });
+
+  // ── POST /api/admin/stock-adjustments/override ──────────────────────────────
+  // Super-admin controlled inventory reconciliation console
+  app.post<{
+    Body: AdminStockAdjustmentOverrideInput & { companyId: string };
+  }>('/stock-adjustments/override', {
+    preHandler: [app.authenticate, (req, reply) => requireSystemAdmin(req, reply)],
+  }, async (req, reply) => {
+    const parsed = adminStockAdjustmentOverrideSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'Invalid input', issues: parsed.error.issues });
+    }
+    const d = parsed.data;
+    const cid = (req.body as any).companyId;
+    if (!cid) return reply.code(400).send({ error: 'companyId is required' });
+
+    const uid = (req.user as any).id;
+
+    // Verify company, plant, warehouse, item belong to this company
+    const [comp] = await db.select().from(companies).where(eq(companies.id, cid)).limit(1);
+    if (!comp) return reply.code(404).send({ error: 'Company not found' });
+
+    const [plt] = await db.select().from(plants).where(and(eq(plants.id, d.plantId), eq(plants.companyId, cid))).limit(1);
+    if (!plt) return reply.code(404).send({ error: 'Plant not found or does not belong to company' });
+
+    const [wh] = await db.select().from(warehouses).where(and(eq(warehouses.id, d.warehouseId), eq(warehouses.companyId, cid))).limit(1);
+    if (!wh) return reply.code(404).send({ error: 'Warehouse not found or does not belong to company' });
+
+    const [it] = await db.select().from(items).where(and(eq(items.id, d.itemId), eq(items.companyId, cid))).limit(1);
+    if (!it) return reply.code(404).send({ error: 'Item not found or does not belong to company' });
+
+    const { fiscalYear, period } = fiscalPeriod(new Date(d.postingDate));
+    const DOC = 'inventory.adjustment';
+
+    try {
+      const result = await db.transaction(async (tx) => {
+        // 1. Generate document number for the audit trail
+        const docNumber = await app.numberSeriesService.next(tx, cid, DOC, { fiscalYear, plantId: d.plantId });
+
+        // 2. Determine valuation rate (paise)
+        let ratePaise = d.valuationRatePaise;
+        if (!ratePaise || ratePaise <= 0) {
+          ratePaise = it.purchaseRatePaise || it.standardCostPaise || 0;
+        }
+
+        const isPositive = d.movementType === 'adjustment_in' || d.movementType === 'opening_balance';
+        const movementType = d.movementType === 'opening_balance'
+          ? 'opening_balance'
+          : isPositive ? 'adjustment_in' : 'adjustment_out';
+
+        // 3. Post stock ledger entry (append-only)
+        const [posted] = await app.stockLedger.postBatch(tx, [{
+          companyId: cid,
+          plantId: d.plantId,
+          warehouseId: d.warehouseId,
+          itemId: d.itemId,
+          movementType: movementType as any,
+          quantity: d.quantity,
+          uom: it.primaryUom || 'NOS',
+          valuationRatePaise: ratePaise,
+          documentType: DOC,
+          documentId: sql`gen_random_uuid()` as any,
+          documentNumber: docNumber,
+          documentLineNumber: 1,
+          postingDate: new Date(d.postingDate),
+          createdBy: uid,
+        }]);
+
+        const totalValuationPaise = posted?.sle?.valuationAmountPaise || Math.round(d.quantity * ratePaise);
+
+        // 4. Post double-entry journal entry to preserve accounting invariants
+        let journalEntryId: string | null = null;
+        if (totalValuationPaise > 0) {
+          const ctx: PostingContext = {
+            companyId: cid,
+            plantId: d.plantId,
+            documentType: isPositive ? 'stock.adjustment_in' : 'stock.adjustment_out',
+            documentId: posted?.sle?.id || docNumber,
+            documentNumber: docNumber,
+            postingDate: new Date(d.postingDate),
+            fiscalYear,
+            period,
+            header: {
+              reasonCode: d.reasonCode,
+              justification: d.justification,
+            },
+            lines: [{
+              lineAmountPaise: totalValuationPaise,
+              itemDescription: `${it.itemName} (${d.reasonCode})`,
+            }],
+          };
+
+          journalEntryId = await app.postingEngine.post(tx, ctx, uid);
+        }
+
+        // 5. Append detailed audit log with super-admin stamp
+        await tx.insert(auditLogs).values({
+          companyId: cid,
+          userId: uid,
+          action: 'ADMIN_STOCK_RECONCILIATION_OVERRIDE',
+          entity: 'stock_ledger_entries',
+          entityId: posted?.sle?.id,
+          details: {
+            documentNumber: docNumber,
+            itemId: d.itemId,
+            itemCode: it.itemCode,
+            itemName: it.itemName,
+            itemType: it.itemType,
+            plantId: d.plantId,
+            warehouseId: d.warehouseId,
+            movementType,
+            quantity: d.quantity,
+            ratePaise,
+            totalValuationPaise,
+            reasonCode: d.reasonCode,
+            justification: d.justification,
+            referenceDocNumber: d.referenceDocNumber,
+            journalEntryId,
+          },
+        });
+
+        return {
+          ok: true,
+          documentNumber: docNumber,
+          movementType,
+          quantity: d.quantity,
+          valuationAmountPaise: totalValuationPaise,
+          journalEntryId,
+        };
+      });
+
+      return reply.code(201).send(result);
+    } catch (err) {
+      req.log.error(err);
+      return reply.code(409).send({ error: 'Admin stock adjustment failed', detail: (err as Error).message });
+    }
+  });
+
+  // ── INDUSTRY BLUEPRINTS & BUNDLE PRESETS ──────────────────────────────────
+  app.get('/blueprints', {
+    preHandler: [app.authenticate, (req, reply) => requireSystemAdmin(req, reply)],
+  }, async () => {
+    return { blueprints: INDUSTRY_BLUEPRINTS };
+  });
+
+  app.get('/companies/:id/modules', {
+    preHandler: [app.authenticate, (req, reply) => requireSystemAdmin(req, reply)],
+  }, async (req) => {
+    const { id } = req.params as { id: string };
+    const rows = await db.select().from(companyModules).where(eq(companyModules.companyId, id));
+    return { modules: rows };
+  });
+
+  app.post('/companies/:id/apply-blueprint', {
+    preHandler: [app.authenticate, (req, reply) => requireSystemAdmin(req, reply)],
+  }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const { blueprintId } = req.body as { blueprintId: string };
+    const bp = INDUSTRY_BLUEPRINTS.find((b) => b.id === blueprintId);
+    if (!bp) return reply.code(400).send({ error: 'Invalid blueprint id' });
+
+    const allKnownModules = ['auth', 'settings', 'purchase', 'sales', 'inventory', 'accounting', 'manufacturing', 'hr', 'payroll'];
+    const uid = (req.user as any).id ?? (req.user as any).sub!;
+
+    await db.transaction(async (tx) => {
+      for (const mod of allKnownModules) {
+        const shouldEnable = bp.modules.includes(mod);
+        const [existing] = await tx
+          .select()
+          .from(companyModules)
+          .where(and(eq(companyModules.companyId, id), eq(companyModules.module, mod)))
+          .limit(1);
+
+        if (existing) {
+          await tx
+            .update(companyModules)
+            .set({ isEnabled: shouldEnable, updatedAt: new Date() })
+            .where(eq(companyModules.id, existing.id));
+        } else {
+          await tx.insert(companyModules).values({
+            companyId: id,
+            module: mod,
+            isEnabled: shouldEnable,
+          });
+        }
+      }
+
+      await tx.insert(auditLogs).values({
+        companyId: id,
+        userId: uid,
+        action: 'APPLY_INDUSTRY_BLUEPRINT',
+        entity: 'company_modules',
+        entityId: id,
+        details: {
+          blueprintId: bp.id,
+          blueprintName: bp.name,
+          enabledModules: bp.modules,
+        },
+      });
+    });
+
+    return reply.send({ success: true, blueprint: bp });
+  });
+
+  app.patch('/companies/:id/modules/:module', {
+    preHandler: [app.authenticate, (req, reply) => requireSystemAdmin(req, reply)],
+  }, async (req, reply) => {
+    const { id, module } = req.params as { id: string; module: string };
+    const { isEnabled } = req.body as { isEnabled: boolean };
+    const uid = (req.user as any).id ?? (req.user as any).sub!;
+
+    const [existing] = await db
+      .select()
+      .from(companyModules)
+      .where(and(eq(companyModules.companyId, id), eq(companyModules.module, module)))
+      .limit(1);
+
+    if (existing) {
+      await db
+        .update(companyModules)
+        .set({ isEnabled: !!isEnabled, updatedAt: new Date() })
+        .where(eq(companyModules.id, existing.id));
+    } else {
+      await db.insert(companyModules).values({
+        companyId: id,
+        module,
+        isEnabled: !!isEnabled,
+      });
+    }
+
+    await db.insert(auditLogs).values({
+      companyId: id,
+      userId: uid,
+      action: 'TOGGLE_COMPANY_MODULE',
+      entity: 'company_modules',
+      entityId: id,
+      details: { module, isEnabled: !!isEnabled },
+    });
+
+    return reply.send({ success: true, module, isEnabled: !!isEnabled });
   });
 }

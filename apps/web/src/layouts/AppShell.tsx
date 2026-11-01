@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   Layout, Menu, Avatar, Dropdown, Typography, Button, Drawer, Tooltip,
@@ -27,7 +27,7 @@ import {
   BellOutlined,
 } from '@ant-design/icons';
 import {
-  Building2, Users, Package, FolderTree, Ruler, FileText, FileSignature, Truck, Receipt, CreditCard, ShoppingCart, PackageCheck, Banknote, Scale, BookOpen, Edit3, ArrowRightLeft, Layers, Barcode, ListTree, Factory, Cog, TrendingUp, Landmark, Clock, Percent, BarChart2, LineChart, PieChart, Activity, DollarSign, Building, Warehouse, Hash, Network, Printer, Plug, Shield, ShieldCheck, Sliders
+  Building2, Users, Package, FolderTree, Ruler, FileText, FileSignature, Truck, Receipt, CreditCard, ShoppingCart, PackageCheck, Banknote, Scale, BookOpen, Edit3, ArrowRightLeft, Layers, Barcode, ListTree, Factory, Cog, TrendingUp, Landmark, Clock, Percent, BarChart2, LineChart, PieChart, Activity, DollarSign, Building, Warehouse, Hash, Network, Printer, Plug, Shield, ShieldCheck, Sliders, RotateCcw, ReceiptText, Zap, FileSpreadsheet, Anchor, Briefcase, ArrowUpRight
 } from 'lucide-react';
 import { useAuthStore } from '../store/auth';
 import { useThemeStore } from '../store/theme';
@@ -40,6 +40,7 @@ import { CommandPalette } from '../components/CommandPalette';
 import { WorkspaceTabs } from '../components/WorkspaceTabs';
 import { SwipeToCloseLogo } from '../components/SwipeToCloseLogo';
 import { useWorkspaceStore } from '../store/workspace';
+import { api } from '../api/client';
 
 const { Header, Sider, Content } = Layout;
 const { Text } = Typography;
@@ -78,26 +79,33 @@ export const NAV_ITEMS: NavItem[] = [
     key: 'purchase',
     icon: <ShoppingCartOutlined />,
     label: 'Purchase',
-    perms: ['purchase.requisition.view', 'purchase.po.view', 'purchase.grn.view', 'purchase.invoice.view', 'purchase.payment.view', 'purchase.payment.create'],
+    perms: ['purchase.requisition.view', 'purchase.po.view', 'purchase.grn.view', 'purchase.invoice.view', 'purchase.payment.view', 'purchase.payment.create', 'purchase.debit_note.view'],
     children: [
       { key: '/purchase/requisitions', icon: <FileText size={16} />, label: 'Requisitions', perms: ['purchase.requisition.view'] },
+      { key: '/purchase/blanket-orders', icon: <FileSpreadsheet size={16} />, label: 'Blanket POs', perms: ['purchase.blanket_po.view', 'purchase.po.view'] },
       { key: '/purchase/orders',       icon: <FileSignature size={16} />, label: 'Purchase Orders', perms: ['purchase.po.view'] },
       { key: '/purchase/grn',          icon: <Truck size={16} />, label: 'GRN', perms: ['purchase.grn.view'] },
+      { key: '/purchase/landed-cost-vouchers', icon: <Anchor size={16} />, label: 'Landed Cost Vouchers', perms: ['purchase.lcv.view', 'purchase.grn.view'] },
       { key: '/purchase/invoices',     icon: <Receipt size={16} />, label: 'Invoices', perms: ['purchase.invoice.view'] },
       { key: '/purchase/payments',     icon: <CreditCard size={16} />, label: 'Payments', perms: ['purchase.payment.view', 'purchase.payment.create'] },
+      { key: '/purchase/returns',      icon: <RotateCcw size={16} />, label: 'Returns', perms: ['purchase.return.view', 'purchase.grn.view'] },
+      { key: '/purchase/debit-notes',  icon: <ReceiptText size={16} />, label: 'Debit Notes', perms: ['purchase.debit_note.view'] },
     ],
   },
   {
     key: 'sales',
     icon: <ShopOutlined />,
     label: 'Sales',
-    perms: ['sales.quotation.view', 'sales.so.view', 'sales.delivery.view', 'sales.invoice.view', 'sales.receipt.view'],
+    perms: ['sales.quotation.view', 'sales.so.view', 'sales.delivery.view', 'sales.invoice.view', 'sales.receipt.view', 'sales.return.view', 'sales.credit_note.view'],
     children: [
+      { key: '/sales/quick-invoice', icon: <Zap size={16} className="text-amber-500" />, label: 'Quick Bill (POS)', perms: ['sales.invoice.create'] },
       { key: '/sales/quotations', icon: <FileSignature size={16} />, label: 'Quotations', perms: ['sales.quotation.view'] },
       { key: '/sales/orders',     icon: <ShoppingCart size={16} />, label: 'Sales Orders', perms: ['sales.so.view'] },
       { key: '/sales/delivery',   icon: <PackageCheck size={16} />, label: 'Deliveries', perms: ['sales.delivery.view'] },
       { key: '/sales/invoices',   icon: <Receipt size={16} />, label: 'Invoices', perms: ['sales.invoice.view'] },
       { key: '/sales/receipts',   icon: <Banknote size={16} />, label: 'Receipts', perms: ['sales.receipt.view'] },
+      { key: '/sales/returns',    icon: <RotateCcw size={16} />, label: 'Sales Returns', perms: ['sales.return.view'] },
+      { key: '/sales/credit-notes', icon: <ReceiptText size={16} />, label: 'Credit Notes', perms: ['sales.credit_note.view'] },
     ],
   },
   {
@@ -122,6 +130,7 @@ export const NAV_ITEMS: NavItem[] = [
     children: [
       { key: '/manufacturing/bom',          icon: <ListTree size={16} />, label: 'Bill of Materials', perms: ['manufacturing.bom.view'] },
       { key: '/manufacturing/orders',       icon: <Factory size={16} />, label: 'Production Orders', perms: ['manufacturing.order.view'] },
+      { key: '/manufacturing/subcontracting', icon: <ArrowUpRight size={16} />, label: 'Subcontracting (Job Work)', perms: ['manufacturing.order.view'] },
       { key: '/manufacturing/batches',      icon: <Layers size={16} />, label: 'Process Batches', perms: ['manufacturing.order.view'] },
       { key: '/manufacturing/work-centres', icon: <Cog size={16} />, label: 'Work Centres', perms: ['manufacturing.order.view'] },
     ],
@@ -133,6 +142,8 @@ export const NAV_ITEMS: NavItem[] = [
     perms: ['accounting.jv.view', 'accounting.coa.view', 'accounting.reports.view', 'accounting.reports.financial'],
     children: [
       { key: '/accounting/jv',             icon: <BookOpen size={16} />, label: 'Journal Vouchers', perms: ['accounting.jv.view'] },
+      { key: '/accounting/projects',       icon: <Briefcase size={16} />, label: 'Project Accounting', perms: ['accounting.jv.view'] },
+      { key: '/accounting/bank-reconciliation', icon: <Landmark size={16} />, label: 'Bank Reconciliation', perms: ['accounting.jv.view'] },
       { key: '/accounting/trial-balance',  icon: <Scale size={16} />, label: 'Trial Balance', perms: ['accounting.reports.financial'] },
       { key: '/accounting/profit-loss',    icon: <TrendingUp size={16} />, label: 'P&L', perms: ['accounting.reports.financial'] },
       { key: '/accounting/balance-sheet',  icon: <Landmark size={16} />, label: 'Balance Sheet', perms: ['accounting.reports.financial'] },
@@ -172,6 +183,7 @@ export const NAV_ITEMS: NavItem[] = [
       { key: '/settings/custom-fields',  icon: <Sliders size={16} />, label: 'Custom Fields', perms: ['settings.company.view'] },
       { key: '/settings/print-templates', icon: <Printer size={16} />, label: 'Print Templates', perms: ['settings.company.view'] },
       { key: '/settings/integrations',   icon: <Plug size={16} />, label: 'Integrations', perms: ['settings.company.view'] },
+      { key: '/settings/user-guide',     icon: <BookOpen size={16} />, label: 'User Guide & Workflows' },
     ],
   },
 ];
@@ -317,23 +329,79 @@ export function AppShell() {
     },
   ];
 
-  // ─── Notifications Mock Data ────────────────────────────────────────────────
-  const notifications = [
-    { id: '1', title: 'Approval Required', description: 'Purchase Order PO-1045 needs your approval.', time: '10m ago', unread: true },
-    { id: '2', title: 'Low Stock Alert', description: 'Item Paracetamol 500mg is below reorder level.', time: '1h ago', unread: true },
-    { id: '3', title: 'System Update', description: 'KAIRO ERP has been updated to v2.4.', time: '2d ago', unread: false },
-  ];
+  // ─── Real-time Notifications ────────────────────────────────────────────────
+  const [notificationsList, setNotificationsList] = useState<Array<{
+    id: string;
+    title: string;
+    description: string;
+    time: string;
+    unread: boolean;
+    type: string;
+    link?: string;
+  }>>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  const fetchNotifications = useCallback(async () => {
+    if (!company?.id) return;
+    try {
+      const res = await api.get('/notifications');
+      if (res.data) {
+        setNotificationsList(res.data.notifications || []);
+        setUnreadCount(res.data.unreadCount ?? 0);
+      }
+    } catch {
+      setNotificationsList([
+        { id: '1', title: 'Approval Required', description: 'Pending purchase/production approvals require action.', time: 'Active', unread: true, type: 'approval', link: '/governance/approvals' },
+        { id: '2', title: 'Stock Status', description: 'Stock monitoring active for all plant warehouses.', time: '1h ago', unread: false, type: 'stock', link: '/inventory/stock-balances' },
+      ]);
+      setUnreadCount(1);
+    }
+  }, [company?.id]);
+
+  useEffect(() => {
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 60000);
+    return () => clearInterval(interval);
+  }, [fetchNotifications]);
+
+  const handleMarkAsRead = async (id: string, link?: string) => {
+    try {
+      await api.post(`/notifications/${id}/read`);
+      setNotificationsList((prev) => prev.map((n) => n.id === id ? { ...n, unread: false } : n));
+      setUnreadCount((c) => Math.max(0, c - 1));
+      if (link) navigate(link);
+    } catch {
+      if (link) navigate(link);
+    }
+  };
+
+  const handleMarkAllRead = async () => {
+    try {
+      await api.post('/notifications/mark-all-read');
+      setNotificationsList((prev) => prev.map((n) => ({ ...n, unread: false })));
+      setUnreadCount(0);
+    } catch {
+      setNotificationsList((prev) => prev.map((n) => ({ ...n, unread: false })));
+      setUnreadCount(0);
+    }
+  };
 
   const notificationContent = (
-    <div style={{ width: 320, margin: '-12px -16px' }}>
+    <div style={{ width: 340, margin: '-12px -16px' }}>
       <div style={{ padding: '12px 16px', borderBottom: `1px solid ${dt.colorBorderSecondary}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Text strong>Notifications</Text>
-        <Button type="link" size="small" style={{ fontSize: 12, padding: 0 }}>Mark all as read</Button>
+        <Text strong>Notifications {unreadCount > 0 && `(${unreadCount})`}</Text>
+        {unreadCount > 0 && (
+          <Button type="link" size="small" onClick={handleMarkAllRead} style={{ fontSize: 12, padding: 0 }}>
+            Mark all as read
+          </Button>
+        )}
       </div>
       <List
-        dataSource={notifications}
+        dataSource={notificationsList}
+        locale={{ emptyText: <div style={{ padding: 16, color: dt.colorTextTertiary }}>No notifications</div> }}
         renderItem={(item) => (
           <List.Item
+            onClick={() => handleMarkAsRead(item.id, item.link)}
             style={{
               padding: '12px 16px',
               cursor: 'pointer',
@@ -358,7 +426,9 @@ export function AppShell() {
         )}
       />
       <div style={{ padding: '10px 16px', textAlign: 'center', borderTop: `1px solid ${dt.colorBorderSecondary}` }}>
-        <Button type="link" size="small" style={{ fontSize: 12 }}>View all notifications</Button>
+        <Button type="link" size="small" onClick={() => navigate('/governance/approvals')} style={{ fontSize: 12 }}>
+          View Pending Approvals
+        </Button>
       </div>
     </div>
   );
@@ -525,7 +595,7 @@ export function AppShell() {
               placement="bottomRight"
               arrow={false}
             >
-              <Badge count={2} size="small" offset={[-4, 4]}>
+              <Badge count={unreadCount} size="small" offset={[-4, 4]}>
                 <Button
                   type="text"
                   shape="circle"

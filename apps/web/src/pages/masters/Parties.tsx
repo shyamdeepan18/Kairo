@@ -5,7 +5,8 @@ import {
   Table, Button, Drawer, Form, Input, Select, Switch, Typography, Tag,
   InputNumber, message, Tabs, Row, Col, theme as antTheme,
 } from 'antd';
-import { PlusOutlined, EditOutlined, SearchOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined } from '@ant-design/icons';
+import { Users, Building2, Plus, Search, CheckCircle2, ShieldCheck, DollarSign } from 'lucide-react';
 import {
   mastersApi, SUPPLIER_TYPES, CUSTOMER_TYPES, MSME_TYPES, CUSTOMER_TIERS, SHIPPING_TERMS_OPTIONS,
   type Supplier, type Customer,
@@ -173,35 +174,127 @@ function PartyPage({ kind }: PartyPageProps) {
     },
   ];
 
+  const activeCount = rows.filter(r => r.isActive).length;
+  const registeredCount = rows.filter(r => ((isSupplier ? (r as any).supplierType : (r as any).customerType) === 'registered')).length;
+  const totalCreditLimitPaise = rows.reduce((sum, r) => sum + (r.creditLimitPaise || 0), 0);
+
   return (
-    <div>
-      <div className="mb-5 flex justify-between items-start">
-        <div>
-          <h2 className="m-0 font-bold text-lg text-slate-900 dark:text-white">{noun}s</h2>
-          <span className="text-[13px] text-slate-500 dark:text-slate-400">{rows.length} {noun.toLowerCase()}{rows.length !== 1 ? 's' : ''}</span>
+    <div className="h-full flex flex-col bg-slate-50 dark:bg-slate-950 min-h-screen text-slate-900 dark:text-slate-100 transition-colors">
+      {/* Top Header Bar */}
+      <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0 transition-colors">
+        <div className="flex items-center space-x-3.5">
+          <div className="p-2.5 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/40 rounded-xl shadow-xs">
+            {isSupplier ? <Building2 className="w-6 h-6" /> : <Users className="w-6 h-6" />}
+          </div>
+          <div>
+            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mb-0.5">
+              <span>Masters</span>
+              <span>/</span>
+              <span className="text-indigo-600 dark:text-indigo-400 font-medium">{noun}s</span>
+            </div>
+            <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
+              {noun} Master Directory
+            </h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Manage commercial accounts, credit limits, GSTIN profiles, and payment terms
+            </p>
+          </div>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => open(null)}>Add {noun}</Button>
+        <button
+          onClick={() => open(null)}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white rounded-xl shadow-xs text-sm font-semibold transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+        >
+          <Plus className="w-4 h-4" />
+          Add {noun}
+        </button>
       </div>
 
-      <Input
-        allowClear
-        prefix={<SearchOutlined />}
-        placeholder={`Search by name, code or GSTIN…`}
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        className="mb-4 max-w-[420px]"
-      />
+      {/* Main Content Area */}
+      <div className="p-6 max-w-7xl mx-auto w-full flex-1 flex flex-col gap-6">
+        {/* KPI Stats Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Total {noun}s</span>
+              <div className="p-2 bg-indigo-50 dark:bg-indigo-950/50 rounded-lg text-indigo-600 dark:text-indigo-400">
+                {isSupplier ? <Building2 className="w-4 h-4" /> : <Users className="w-4 h-4" />}
+              </div>
+            </div>
+            <div className="text-2xl font-bold text-slate-900 dark:text-white mt-2">{rows.length}</div>
+            <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">Configured {noun.toLowerCase()} entities</div>
+          </div>
 
-      <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
-        <Table
-          dataSource={rows}
-          columns={columns}
-          rowKey="id"
-          loading={loading}
-          pagination={{ pageSize: 20, hideOnSinglePage: true }}
-          locale={{ emptyText: `No ${noun.toLowerCase()}s yet.` }}
-          onRow={(r) => ({ onClick: () => navigate(`/masters/${kind}s/${r.id}`), style: { cursor: 'pointer' } })}
-        />
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Active Accounts</span>
+              <div className="p-2 bg-emerald-50 dark:bg-emerald-950/50 rounded-lg text-emerald-600 dark:text-emerald-400">
+                <CheckCircle2 className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-2">{activeCount}</div>
+            <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">Operational commercial accounts</div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">GST Registered</span>
+              <div className="p-2 bg-blue-50 dark:bg-blue-950/50 rounded-lg text-blue-600 dark:text-blue-400">
+                <ShieldCheck className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-2">{registeredCount}</div>
+            <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">With verified GSTIN compliance</div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Total Credit Cap</span>
+              <div className="p-2 bg-purple-50 dark:bg-purple-950/50 rounded-lg text-purple-600 dark:text-purple-400">
+                <DollarSign className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="text-2xl font-bold text-purple-600 dark:text-purple-400 mt-2">
+              ₹ {rupees(totalCreditLimitPaise)}
+            </div>
+            <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">Cumulative assigned credit limit</div>
+          </div>
+        </div>
+
+        {/* Floating Filter Card */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3 transition-colors">
+          <div className="relative flex-1 w-full">
+            <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400 dark:text-slate-500" />
+            <input
+              type="text"
+              placeholder={`Search ${noun.toLowerCase()} by name, code, or GSTIN...`}
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              className="w-full pl-9 pr-4 py-2 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-white placeholder-slate-400 transition-colors"
+            />
+          </div>
+        </div>
+
+        {/* Table Container Card */}
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden transition-colors">
+          <div className="p-4 border-b border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900 dark:text-white">{noun} Directory Registry</h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Click any row to inspect detail ledger and transaction history</p>
+            </div>
+            <span className="text-xs px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-medium">
+              {rows.length} Records
+            </span>
+          </div>
+          <Table
+            dataSource={rows}
+            columns={columns}
+            rowKey="id"
+            loading={loading}
+            pagination={{ pageSize: 20, hideOnSinglePage: true }}
+            locale={{ emptyText: `No ${noun.toLowerCase()}s yet.` }}
+            onRow={(r) => ({ onClick: () => navigate(`/masters/${kind}s/${r.id}`), style: { cursor: 'pointer' } })}
+          />
+        </div>
       </div>
 
       <Drawer

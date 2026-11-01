@@ -7,7 +7,7 @@ import { companies, plants, warehouses } from './company.js';
 import { users } from './auth.js';
 import { items, itemBatches } from './inventory.js';
 import { taxCodes } from './tax.js';
-import { journalEntries } from './accounting.js';
+import { journalEntries, chartOfAccounts } from './accounting.js';
 
 // ─── Phase 6 — Purchase module ─────────────────────────────────────────────
 //
@@ -242,6 +242,65 @@ export const purchaseRequisitionLines = pgTable(
   })
 );
 
+// ─── 1b. Blanket Purchase Order (BPO) — GAP 7 ──────────────────────────────
+//
+// Long-term rate contract committing to an annual / bulk quantity with staggered
+// releases via standard purchase orders.
+
+export const blanketPurchaseOrders = pgTable(
+  'blanket_purchase_orders',
+  {
+    ...documentHeader('purchase.blanket_po'),
+    supplierId: uuid('supplier_id').notNull().references(() => suppliers.id),
+    validFrom: date('valid_from').notNull(),
+    validTo: date('valid_to').notNull(),
+    termsAndConditions: text('terms_and_conditions'),
+  },
+  (t) => ({
+    uniqueNumber: unique('blanket_po_number_uq').on(t.companyId, t.documentNumber),
+    companyDateIdx: index('blanket_po_company_date_idx').on(t.companyId, t.postingDate),
+    supplierIdx: index('blanket_po_supplier_idx').on(t.supplierId),
+    statusIdx: index('blanket_po_status_idx').on(t.companyId, t.status),
+  })
+);
+
+export const blanketPoLines = pgTable(
+  'blanket_po_lines',
+  {
+    id: uuid('id').default(sql`gen_random_uuid()`).primaryKey(),
+    blanketPoId: uuid('blanket_po_id')
+      .notNull()
+      .references(() => blanketPurchaseOrders.id, { onDelete: 'cascade' }),
+    lineNumber: integer('line_number').notNull(),
+
+    itemId: uuid('item_id').notNull().references(() => items.id),
+    description: text('description'),
+    committedQty: qty('committed_qty').notNull(),
+    releasedQty: qty('released_qty').default('0').notNull(),
+    uom: varchar('uom', { length: 20 }).notNull(),
+
+    ratePaise: money('rate_paise').notNull(),
+    discountPercent: numeric('discount_percent', { precision: 5, scale: 2 }).default('0').notNull(),
+    discountPaise: money('discount_paise').default(0).notNull(),
+    netAmountPaise: money('net_amount_paise').notNull(),
+
+    taxCodeId: uuid('tax_code_id').references(() => taxCodes.id),
+    hsnSacCode: varchar('hsn_sac_code', { length: 20 }),
+    cgstAmountPaise: money('cgst_amount_paise').default(0).notNull(),
+    sgstAmountPaise: money('sgst_amount_paise').default(0).notNull(),
+    igstAmountPaise: money('igst_amount_paise').default(0).notNull(),
+    cessAmountPaise: money('cess_amount_paise').default(0).notNull(),
+    taxAmountPaise: money('tax_amount_paise').default(0).notNull(),
+    totalAmountPaise: money('total_amount_paise').notNull(),
+
+    custom_data: jsonb('custom_data').$type<Record<string, unknown>>().default({}),
+  },
+  (t) => ({
+    blanketPoIdx: index('blanket_po_lines_bpo_idx').on(t.blanketPoId),
+    itemIdx: index('blanket_po_lines_item_idx').on(t.itemId),
+  })
+);
+
 // ─── 2. Purchase Order (PO) ────────────────────────────────────────────────
 //
 // Commitment to a supplier. Drives expected supply (stock_balances.quantityOrdered)
@@ -254,6 +313,10 @@ export const purchaseOrders = pgTable(
     supplierId: uuid('supplier_id').notNull().references(() => suppliers.id),
     /** Origin requisition, if the PO was raised from a PR */
     requisitionId: uuid('requisition_id').references(() => purchaseRequisitions.id),
+    /** Origin blanket purchase order, if released against a long-term contract */
+    blanketPoId: uuid('blanket_po_id').references(() => blanketPurchaseOrders.id),
+    /** GAP 8: Project Accounting tag */
+    projectId: uuid('project_id'),
 
     /** Supplier's quotation / reference number */
     supplierRef: varchar('supplier_ref', { length: 100 }),
@@ -290,6 +353,8 @@ export const purchaseOrderLines = pgTable(
     lineNumber: integer('line_number').notNull(),
     /** Trace back to the PR line that generated this PO line */
     requisitionLineId: uuid('requisition_line_id').references(() => purchaseRequisitionLines.id),
+    /** Trace back to the Blanket PO line for rate contract & quota tracking */
+    blanketPoLineId: uuid('blanket_po_line_id').references(() => blanketPoLines.id),
 
     itemId: uuid('item_id').notNull().references(() => items.id),
     description: text('description'),
@@ -384,6 +449,9 @@ export const goodsReceiptNoteLines = pgTable(
     acceptedQty: qty('accepted_qty').notNull(),     // after QC
     rejectedQty: qty('rejected_qty').default('0').notNull(),
     uom: varchar('uom', { length: 20 }).notNull(),
+    /** GAP 6: Catch-Weight Dual UOM */
+    secondaryQty: qty('secondary_qty'),
+    secondaryUom: varchar('secondary_uom', { length: 20 }),
 
     ratePaise: money('rate_paise').notNull(),        // unit price (from PO / manual)
     /** Per-unit landed cost capitalised into stock (rate + apportioned charges) */
@@ -426,6 +494,8 @@ export const purchaseInvoices = pgTable(
     supplierId: uuid('supplier_id').notNull().references(() => suppliers.id),
     /** PO this invoice bills against (for 3-way match) */
     poId: uuid('po_id').references(() => purchaseOrders.id),
+    /** GAP 8: Project Accounting tag */
+    projectId: uuid('project_id'),
 
     /** Supplier's own invoice number + date (mandatory for ITC) */
     supplierInvoiceNumber: varchar('supplier_invoice_number', { length: 50 }).notNull(),
@@ -611,6 +681,167 @@ export const purchaseReturnLines = pgTable(
   })
 );
 
+// ─── 7. Purchase Debit Note (Supplier Debit / AP & ITC Reversal) ───────────
+
+export const purchaseDebitNotes = pgTable(
+  'purchase_debit_notes',
+  {
+    ...documentHeader('purchase.debit_note'),
+    supplierId: uuid('supplier_id').notNull().references(() => suppliers.id),
+    /** Original supplier purchase invoice being debited */
+    invoiceId: uuid('invoice_id').references(() => purchaseInvoices.id),
+    /** Optional linked purchase return (if debit note is against physical return) */
+    returnId: uuid('return_id').references(() => purchaseReturns.id),
+
+    reason: text('reason'),
+    supplierDebitNoteNumber: varchar('supplier_debit_note_number', { length: 50 }),
+    supplierDebitNoteDate: date('supplier_debit_note_date'),
+
+    /** GL entry created when the debit note is approved (DR AP / CR Purchases/Clearing + Input Tax) */
+    journalEntryId: uuid('journal_entry_id').references(() => journalEntries.id),
+  },
+  (t) => ({
+    uniqueNumber: unique('purchase_debit_notes_number_uq').on(t.companyId, t.documentNumber),
+    companyDateIdx: index('purchase_debit_notes_company_date_idx').on(t.companyId, t.postingDate),
+    supplierIdx: index('purchase_debit_notes_supplier_idx').on(t.supplierId),
+    invoiceIdx: index('purchase_debit_notes_invoice_idx').on(t.invoiceId),
+    returnIdx: index('purchase_debit_notes_return_idx').on(t.returnId),
+  })
+);
+
+export const purchaseDebitNoteLines = pgTable(
+  'purchase_debit_note_lines',
+  {
+    id: uuid('id').default(sql`gen_random_uuid()`).primaryKey(),
+    debitNoteId: uuid('debit_note_id')
+      .notNull()
+      .references(() => purchaseDebitNotes.id, { onDelete: 'cascade' }),
+    lineNumber: integer('line_number').notNull(),
+
+    invoiceLineId: uuid('invoice_line_id').references(() => purchaseInvoiceLines.id),
+    returnLineId: uuid('return_line_id').references(() => purchaseReturnLines.id),
+
+    itemId: uuid('item_id').notNull().references(() => items.id),
+    description: text('description'),
+    quantity: qty('quantity').notNull(),
+    uom: varchar('uom', { length: 20 }).notNull(),
+
+    ratePaise: money('rate_paise').notNull(),
+    discountPercent: numeric('discount_percent', { precision: 5, scale: 2 }).default('0').notNull(),
+    discountPaise: money('discount_paise').default(0).notNull(),
+    netAmountPaise: money('net_amount_paise').notNull(),
+
+    taxCodeId: uuid('tax_code_id').references(() => taxCodes.id),
+    hsnSacCode: varchar('hsn_sac_code', { length: 20 }),
+    cgstAmountPaise: money('cgst_amount_paise').default(0).notNull(),
+    sgstAmountPaise: money('sgst_amount_paise').default(0).notNull(),
+    igstAmountPaise: money('igst_amount_paise').default(0).notNull(),
+    cessAmountPaise: money('cess_amount_paise').default(0).notNull(),
+    taxAmountPaise: money('tax_amount_paise').default(0).notNull(),
+    totalAmountPaise: money('total_amount_paise').notNull(),
+
+    custom_data: jsonb('custom_data').$type<Record<string, unknown>>().default({}),
+  },
+  (t) => ({
+    debitNoteIdx: index('purchase_dn_lines_dn_idx').on(t.debitNoteId),
+    itemIdx: index('purchase_dn_lines_item_idx').on(t.itemId),
+    invoiceLineIdx: index('purchase_dn_lines_inv_line_idx').on(t.invoiceLineId),
+    returnLineIdx: index('purchase_dn_lines_ret_line_idx').on(t.returnLineId),
+  })
+);
+
+// ─── 8. Landed Cost Voucher (LCV) — GAP 3 ──────────────────────────────────
+//
+// Apportions freight, customs, clearing, handling, and marine insurance across
+// one or multiple Goods Receipt Notes (GRN) to update unit WAC retroactively.
+
+export const landedCostVouchers = pgTable(
+  'landed_cost_vouchers',
+  {
+    ...documentHeader('purchase.lcv'),
+    /** 'by_value' | 'by_qty' */
+    allocationBasis: varchar('allocation_basis', { length: 20 }).default('by_value').notNull(),
+    totalChargesPaise: money('total_charges_paise').notNull(),
+    journalEntryId: uuid('journal_entry_id').references(() => journalEntries.id),
+  },
+  (t) => ({
+    uniqueNumber: unique('lcv_number_uq').on(t.companyId, t.documentNumber),
+    companyDateIdx: index('lcv_company_date_idx').on(t.companyId, t.postingDate),
+    statusIdx: index('lcv_status_idx').on(t.companyId, t.status),
+  })
+);
+
+export const lcvApplicableGrns = pgTable(
+  'lcv_applicable_grns',
+  {
+    id: uuid('id').default(sql`gen_random_uuid()`).primaryKey(),
+    lcvId: uuid('lcv_id')
+      .notNull()
+      .references(() => landedCostVouchers.id, { onDelete: 'cascade' }),
+    grnId: uuid('grn_id')
+      .notNull()
+      .references(() => goodsReceiptNotes.id),
+    grnAmountPaise: money('grn_amount_paise').notNull(),
+    allocatedChargesPaise: money('allocated_charges_paise').default(0).notNull(),
+  },
+  (t) => ({
+    lcvIdx: index('lcv_applicable_grns_lcv_idx').on(t.lcvId),
+    grnIdx: index('lcv_applicable_grns_grn_idx').on(t.grnId),
+  })
+);
+
+export const lcvExpenseLines = pgTable(
+  'lcv_expense_lines',
+  {
+    id: uuid('id').default(sql`gen_random_uuid()`).primaryKey(),
+    lcvId: uuid('lcv_id')
+      .notNull()
+      .references(() => landedCostVouchers.id, { onDelete: 'cascade' }),
+    expenseAccountId: uuid('expense_account_id')
+      .notNull()
+      .references(() => chartOfAccounts.id),
+    description: varchar('description', { length: 255 }).notNull(),
+    amountPaise: money('amount_paise').notNull(),
+  },
+  (t) => ({
+    lcvIdx: index('lcv_expense_lines_lcv_idx').on(t.lcvId),
+    accountIdx: index('lcv_expense_lines_account_idx').on(t.expenseAccountId),
+  })
+);
+
+export const lcvAllocatedItems = pgTable(
+  'lcv_allocated_items',
+  {
+    id: uuid('id').default(sql`gen_random_uuid()`).primaryKey(),
+    lcvId: uuid('lcv_id')
+      .notNull()
+      .references(() => landedCostVouchers.id, { onDelete: 'cascade' }),
+    grnId: uuid('grn_id')
+      .notNull()
+      .references(() => goodsReceiptNotes.id),
+    grnLineId: uuid('grn_line_id')
+      .notNull()
+      .references(() => goodsReceiptNoteLines.id),
+    itemId: uuid('item_id')
+      .notNull()
+      .references(() => items.id),
+    warehouseId: uuid('warehouse_id')
+      .notNull()
+      .references(() => warehouses.id),
+    quantity: qty('quantity').notNull(),
+    lineAmountPaise: money('line_amount_paise').notNull(),
+    allocatedChargePaise: money('allocated_charge_paise').notNull(),
+    absorbedPaise: money('absorbed_paise').default(0).notNull(),
+    cogsVariancePaise: money('cogs_variance_paise').default(0).notNull(),
+    sleId: uuid('sle_id'),
+  },
+  (t) => ({
+    lcvIdx: index('lcv_allocated_items_lcv_idx').on(t.lcvId),
+    itemIdx: index('lcv_allocated_items_item_idx').on(t.itemId),
+    grnLineIdx: index('lcv_allocated_items_grn_line_idx').on(t.grnLineId),
+  })
+);
+
 // ─── Drizzle inference types ───────────────────────────────────────────────
 
 export type Supplier = typeof suppliers.$inferSelect;
@@ -620,6 +851,11 @@ export type PurchaseRequisition = typeof purchaseRequisitions.$inferSelect;
 export type NewPurchaseRequisition = typeof purchaseRequisitions.$inferInsert;
 export type PurchaseRequisitionLine = typeof purchaseRequisitionLines.$inferSelect;
 export type NewPurchaseRequisitionLine = typeof purchaseRequisitionLines.$inferInsert;
+
+export type BlanketPurchaseOrder = typeof blanketPurchaseOrders.$inferSelect;
+export type NewBlanketPurchaseOrder = typeof blanketPurchaseOrders.$inferInsert;
+export type BlanketPoLine = typeof blanketPoLines.$inferSelect;
+export type NewBlanketPoLine = typeof blanketPoLines.$inferInsert;
 
 export type PurchaseOrder = typeof purchaseOrders.$inferSelect;
 export type NewPurchaseOrder = typeof purchaseOrders.$inferInsert;
@@ -640,3 +876,22 @@ export type PurchasePayment = typeof purchasePayments.$inferSelect;
 export type NewPurchasePayment = typeof purchasePayments.$inferInsert;
 export type PurchasePaymentAllocation = typeof purchasePaymentAllocations.$inferSelect;
 export type NewPurchasePaymentAllocation = typeof purchasePaymentAllocations.$inferInsert;
+
+export type PurchaseReturn = typeof purchaseReturns.$inferSelect;
+export type NewPurchaseReturn = typeof purchaseReturns.$inferInsert;
+export type PurchaseReturnLine = typeof purchaseReturnLines.$inferSelect;
+export type NewPurchaseReturnLine = typeof purchaseReturnLines.$inferInsert;
+
+export type PurchaseDebitNote = typeof purchaseDebitNotes.$inferSelect;
+export type NewPurchaseDebitNote = typeof purchaseDebitNotes.$inferInsert;
+export type PurchaseDebitNoteLine = typeof purchaseDebitNoteLines.$inferSelect;
+export type NewPurchaseDebitNoteLine = typeof purchaseDebitNoteLines.$inferInsert;
+
+export type LandedCostVoucher = typeof landedCostVouchers.$inferSelect;
+export type NewLandedCostVoucher = typeof landedCostVouchers.$inferInsert;
+export type LcvApplicableGrn = typeof lcvApplicableGrns.$inferSelect;
+export type NewLcvApplicableGrn = typeof lcvApplicableGrns.$inferInsert;
+export type LcvExpenseLine = typeof lcvExpenseLines.$inferSelect;
+export type NewLcvExpenseLine = typeof lcvExpenseLines.$inferInsert;
+export type LcvAllocatedItem = typeof lcvAllocatedItems.$inferSelect;
+export type NewLcvAllocatedItem = typeof lcvAllocatedItems.$inferInsert;

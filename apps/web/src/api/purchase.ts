@@ -24,7 +24,9 @@ export interface PurchaseHeader {
   supplierId?: string;
   supplierInvoiceNumber?: string;
   netAmountPaise: number;
+  discountPaise?: number;
   taxAmountPaise: number;
+  roundOffPaise?: number;
   totalAmountPaise: number;
   paidAmountPaise?: number;
   paymentStatus?: string;
@@ -107,6 +109,7 @@ export const purchaseApi = {
     get: (companyId: string, id: string) => getDoc('orders', companyId, id),
     create: (body: Record<string, unknown>) => createDoc('orders', body),
     update: (id: string, body: Record<string, unknown>) => updateDoc('orders', id, body),
+    shortClose: (id: string, remarks?: string) => api.post(`${BASE}/orders/${id}/short-close`, { remarks }).then((r) => r.data),
     act: (id: string, action: PurchaseAction, companyId: string, remarks?: string) => act('orders', id, action, companyId, remarks),
   },
 
@@ -129,6 +132,38 @@ export const purchaseApi = {
     get: (companyId: string, id: string) => getDoc('payments', companyId, id),
     create: (body: Record<string, unknown>) => createDoc('payments', body),
     act: (id: string, action: PurchaseAction, companyId: string, remarks?: string) => act('payments', id, action, companyId, remarks),
+  },
+
+  debitNotes: {
+    list: (companyId: string, params?: Record<string, unknown>) => listDocs('debit-notes', companyId, params),
+    get: (companyId: string, id: string) => getDoc('debit-notes', companyId, id),
+    create: (body: Record<string, unknown>) => createDoc('debit-notes', body),
+    act: (id: string, action: PurchaseAction, companyId: string, remarks?: string) => act('debit-notes', id, action, companyId, remarks),
+  },
+
+  returns: {
+    list: (companyId: string, params?: Record<string, unknown>) => listDocs('returns', companyId, params),
+    get: (companyId: string, id: string) => getDoc('returns', companyId, id),
+    create: (body: Record<string, unknown>) => createDoc('returns', body),
+    act: (id: string, action: PurchaseAction, companyId: string, remarks?: string) => act('returns', id, action, companyId, remarks),
+  },
+
+  blanketOrders: {
+    list: (companyId: string, params?: Record<string, unknown>) => listDocs('blanket-orders', companyId, params),
+    get: (companyId: string, id: string) => getDoc('blanket-orders', companyId, id),
+    create: (body: Record<string, unknown>) => createDoc('blanket-orders', body),
+    act: (id: string, action: PurchaseAction, companyId: string, remarks?: string) => act('blanket-orders', id, action, companyId, remarks),
+  },
+
+  landedCostVouchers: {
+    list: (companyId: string, params?: Record<string, unknown>) => listDocs('landed-cost-vouchers', companyId, params),
+    get: (companyId: string, id: string) => getDoc('landed-cost-vouchers', companyId, id),
+    create: (body: Record<string, unknown>) => createDoc('landed-cost-vouchers', body),
+    post: async (id: string) => {
+      const { data } = await api.post<any>(`${BASE}/landed-cost-vouchers/${id}/post`);
+      return data;
+    },
+    cancel: (id: string, companyId: string, remarks?: string) => act('landed-cost-vouchers', id, 'cancel', companyId, remarks),
   },
 };
 

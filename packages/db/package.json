@@ -3,13 +3,17 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "import": "./dist/index.js",
+      "default": "./dist/index.js",
       "types": "./dist/index.d.ts"
     },
     "./seeds/*": {
       "import": "./dist/seeds/*.js",
+      "default": "./dist/seeds/*.js",
       "types": "./dist/seeds/*.d.ts"
     }
   },

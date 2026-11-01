@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import { Drawer, Form, DatePicker, Input, Select, message } from 'antd';
 import dayjs from 'dayjs';
-import { Receipt, Plus, Eye, Send, CheckCircle2, Search, FileText, User, Calendar, ClipboardList } from 'lucide-react';
+import { Receipt, Plus, Eye, Send, CheckCircle2, Search, FileText, User, Calendar, ClipboardList, DollarSign, Clock, ShieldCheck } from 'lucide-react';
 import { usePlantStore } from '../../store/plant';
 import { salesApi, type SalesHeader, type Customer } from '../../api/sales';
 import { mastersApi, type Item } from '../../api/masters';
@@ -26,6 +26,7 @@ export function SalesInvoicesPage() {
   const [drawer, setDrawer] = useState(false);
   const [saving, setSaving] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
+  const [searchQuery, setSearchQuery] = useState('');
   const [viewing, setViewing] = useState<any | null>(null);
 
   const custName = (id?: string) => customers.find((c) => c.id === id)?.name ?? '—';
@@ -48,6 +49,15 @@ export function SalesInvoicesPage() {
     mastersApi.listItems(company.id).then(setItems).catch(() => {});
     settingsApi.listTaxCodes(company.id).then(setTaxCodes).catch(() => {});
   }, [company?.id]);
+
+  const filteredRows = React.useMemo(() => {
+    if (!searchQuery.trim()) return rows;
+    const q = searchQuery.toLowerCase();
+    return rows.filter((r) =>
+      r.documentNumber.toLowerCase().includes(q) ||
+      custName(r.customerId).toLowerCase().includes(q)
+    );
+  }, [rows, searchQuery, customers]);
 
   const refItems: RefItem[] = items.map((i) => ({
     id: i.id,
@@ -96,34 +106,123 @@ export function SalesInvoicesPage() {
     catch (e) { message.error(apiErr(e)); }
   };
 
+  const totalInvoices = rows.length;
+  const totalBilledValuePaise = useMemo(() => {
+    return rows.reduce((acc, r) => acc + (r.totalAmountPaise || 0), 0);
+  }, [rows]);
+  const pendingInvoices = rows.filter((r) => r.status === 'draft' || r.status === 'submitted').length;
+  const approvedInvoices = rows.filter((r) => r.status === 'approved').length;
+
   return (
-    <div className="h-full flex flex-col bg-slate-50 dark:bg-slate-900 transition-colors">
-      <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 py-6 flex flex-col lg:flex-row justify-between items-start lg:items-center shrink-0 transition-colors relative z-10 gap-4">
-        <div className="flex items-center space-x-3">
-          <div className="p-2 bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 rounded-lg">
+    <div className="h-full flex flex-col bg-slate-50 dark:bg-slate-950 min-h-screen text-slate-900 dark:text-slate-100 transition-colors">
+      {/* Universal Page Header Bar */}
+      <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0 shadow-xs">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-purple-50 dark:bg-purple-950/50 text-purple-600 dark:text-purple-400 border border-purple-100 dark:border-purple-900/40 rounded-xl">
             <Receipt className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-slate-900 dark:text-white dark:text-white transition-colors">Sales Invoices</h1>
-            <p className="text-sm text-slate-500 dark:text-slate-400 dark:text-slate-400 transition-colors">Bill customers. Approving posts Revenue & Accounts Receivable.</p>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold tracking-wider text-slate-500 dark:text-slate-400 uppercase">Sales</span>
+              <span className="text-xs text-slate-300 dark:text-slate-700">/</span>
+              <span className="text-xs font-medium text-purple-600 dark:text-purple-400">Invoices</span>
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+              Sales Invoices
+            </h1>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Bill customers, recognize earned revenue, charge GST & post Accounts Receivable
+            </p>
           </div>
         </div>
-        <button 
-          onClick={openNew}
-          className="flex items-center px-4 py-2 bg-purple-600 dark:bg-purple-600/90 text-white font-bold rounded-lg shadow-sm hover:bg-purple-700 dark:hover:bg-purple-500 transition-colors"
-        >
-          <Plus className="w-4 h-4 mr-2" /> New Invoice
-        </button>
+
+        <div className="flex items-center gap-3">
+          <button 
+            type="button"
+            onClick={openNew}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white rounded-xl shadow-xs text-sm font-semibold transition-all cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            New Invoice
+          </button>
+        </div>
       </div>
 
-      <div className="flex-1 p-6 overflow-auto">
-        <div className="mb-4 flex items-center space-x-4">
-          <div className="relative">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 dark:text-slate-400" />
+      {/* Main Content Area */}
+      <div className="p-6 max-w-7xl mx-auto w-full flex-1 flex flex-col gap-6">
+        {/* KPI Stats Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+              <span className="text-xs font-semibold uppercase tracking-wider">Total Invoices</span>
+              <div className="p-2 bg-purple-50 dark:bg-purple-950/60 rounded-xl text-purple-600 dark:text-purple-400">
+                <Receipt className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="mt-2 text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+              {totalInvoices}
+            </div>
+            <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Customer bills generated
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+              <span className="text-xs font-semibold uppercase tracking-wider">Invoiced AR Value</span>
+              <div className="p-2 bg-blue-50 dark:bg-blue-950/60 rounded-xl text-blue-600 dark:text-blue-400">
+                <DollarSign className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="mt-2 text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+              <AmountDisplay paise={totalBilledValuePaise} />
+            </div>
+            <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Total revenue recognized
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+              <span className="text-xs font-semibold uppercase tracking-wider">Pending Approvals</span>
+              <div className="p-2 bg-amber-50 dark:bg-amber-950/60 rounded-xl text-amber-600 dark:text-amber-400">
+                <Clock className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="mt-2 text-2xl font-bold tracking-tight text-amber-600 dark:text-amber-400">
+              {pendingInvoices}
+            </div>
+            <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Awaiting billing audit
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+              <span className="text-xs font-semibold uppercase tracking-wider">Booked to AR</span>
+              <div className="p-2 bg-emerald-50 dark:bg-emerald-950/60 rounded-xl text-emerald-600 dark:text-emerald-400">
+                <ShieldCheck className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="mt-2 text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">
+              {approvedInvoices}
+            </div>
+            <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              General ledger posted
+            </div>
+          </div>
+        </div>
+
+        {/* Filter Bar */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-xs flex flex-col sm:flex-row gap-3 items-center justify-between">
+          <div className="relative w-full sm:w-80">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
             <input 
               type="text" 
-              placeholder="Search Invoice number..." 
-              className="pl-9 pr-4 py-2 w-64 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-lg text-sm text-slate-900 dark:text-white dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500 transition-colors"
+              placeholder="Search Invoice number or customer..." 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-4 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 dark:text-white"
             />
           </div>
           <Select 
@@ -131,14 +230,29 @@ export function SalesInvoicesPage() {
             placeholder="All Statuses" 
             value={statusFilter} 
             onChange={setStatusFilter} 
-            style={{ minWidth: 150 }} 
+            className="w-44" 
             options={STATUS_OPTIONS} 
           />
         </div>
 
-        <div className="bg-white dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden transition-colors min-h-[400px]">
+        {/* Table Container Card */}
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center">
+            <div>
+              <h3 className="font-semibold text-slate-900 dark:text-white">
+                Sales Invoice Registry
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Customer invoices, GST tax obligations, and Accounts Receivable tracking
+              </p>
+            </div>
+            <span className="text-xs font-mono px-2.5 py-1 bg-slate-100 dark:bg-slate-800 rounded-lg text-slate-600 dark:text-slate-400">
+              {filteredRows.length} invoices
+            </span>
+          </div>
+
           <table className="w-full text-sm text-left">
-            <thead className="text-xs text-slate-500 dark:text-slate-400 dark:text-slate-400 uppercase bg-slate-50/50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 transition-colors">
+            <thead className="text-xs text-slate-500 dark:text-slate-400 uppercase bg-slate-50/50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 transition-colors">
               <tr>
                 <th className="px-6 py-4 font-bold">Invoice Number</th>
                 <th className="px-6 py-4 font-bold">Customer</th>
@@ -149,27 +263,27 @@ export function SalesInvoicesPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50 dark:divide-slate-800/50">
-              {rows.map(r => (
+              {filteredRows.map(r => (
                 <tr key={r.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition-colors group">
                   <td className="px-6 py-4">
                     <div className="flex items-center space-x-2">
-                      <FileText className="w-4 h-4 text-slate-400 dark:text-slate-500 dark:text-slate-400" />
+                      <FileText className="w-4 h-4 text-slate-400 dark:text-slate-500" />
                       <span className="font-mono font-bold text-purple-700 dark:text-purple-400 transition-colors">{r.documentNumber}</span>
                     </div>
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center space-x-2">
-                      <User className="w-4 h-4 text-slate-400 dark:text-slate-500 dark:text-slate-400" />
-                      <span className="text-slate-800 dark:text-slate-200 dark:text-slate-200 font-medium transition-colors">{custName(r.customerId)}</span>
+                      <User className="w-4 h-4 text-slate-400 dark:text-slate-500" />
+                      <span className="text-slate-800 dark:text-slate-200 font-medium transition-colors">{custName(r.customerId)}</span>
                     </div>
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center space-x-2">
-                      <Calendar className="w-4 h-4 text-slate-400 dark:text-slate-500 dark:text-slate-400" />
-                      <span className="text-slate-500 dark:text-slate-400 dark:text-slate-400 font-medium transition-colors">{r.postingDate}</span>
+                      <Calendar className="w-4 h-4 text-slate-400 dark:text-slate-500" />
+                      <span className="text-slate-500 dark:text-slate-400 font-medium transition-colors">{r.postingDate}</span>
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-right font-mono font-bold text-slate-900 dark:text-white dark:text-white transition-colors">
+                  <td className="px-6 py-4 text-right font-mono font-bold text-slate-900 dark:text-white transition-colors">
                     <AmountDisplay paise={r.totalAmountPaise} />
                   </td>
                   <td className="px-6 py-4 text-center">
@@ -177,18 +291,18 @@ export function SalesInvoicesPage() {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end space-x-3">
-                      <button onClick={() => openView(r)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
+                      <button onClick={() => openView(r)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors cursor-pointer" title="View details">
                         <Eye className="w-4 h-4" />
                       </button>
                       
                       {r.status === 'draft' && (
-                        <button onClick={() => act(r, 'submit')} className="flex items-center text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 text-xs font-bold transition-colors">
+                        <button onClick={() => act(r, 'submit')} className="flex items-center text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 text-xs font-bold transition-colors cursor-pointer">
                           <Send className="w-3.5 h-3.5 mr-1" /> Submit
                         </button>
                       )}
                       
                       {r.status === 'submitted' && (
-                        <button onClick={() => act(r, 'approve')} className="flex items-center text-emerald-600 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 text-xs font-bold transition-colors">
+                        <button onClick={() => act(r, 'approve')} className="flex items-center text-emerald-600 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 text-xs font-bold transition-colors cursor-pointer">
                           <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Approve
                         </button>
                       )}
@@ -196,9 +310,9 @@ export function SalesInvoicesPage() {
                   </td>
                 </tr>
               ))}
-              {rows.length === 0 && !loading && (
+              {filteredRows.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center text-slate-500 dark:text-slate-400 dark:text-slate-400 transition-colors">
+                  <td colSpan={6} className="px-6 py-12 text-center text-slate-500 dark:text-slate-400 transition-colors">
                     <ClipboardList className="w-8 h-8 mx-auto mb-2 opacity-50" />
                     No Invoices found
                   </td>

@@ -4,7 +4,7 @@ import {
   db,
   userRoles, rolePermissions, permissions,
   userPermissions, userPlantAccess, userWarehouseAccess, userApprovalLimits,
-  users,
+  users, plants,
 } from '@erp/db';
 
 /**
@@ -71,8 +71,13 @@ export class PermissionService {
 
   /**
    * Verify user has access to a specific plant.
+   * Access is granted if:
+   *   1. The user has an explicit record in user_plant_access, OR
+   *   2. The user has a role assigned specifically to this plant (user_roles.plant_id = plantId), OR
+   *   3. The user has a company-wide role in the company that owns the plant (user_roles.plant_id IS NULL)
    */
   async hasPlantAccess(userId: string, plantId: string): Promise<boolean> {
+    // 1. Direct explicit plant grant
     const [row] = await db
       .select({ userId: userPlantAccess.userId })
       .from(userPlantAccess)
@@ -82,7 +87,33 @@ export class PermissionService {
       ))
       .limit(1);
 
-    return !!row;
+    if (row) return true;
+
+    // 2. Role assigned directly to this plant
+    const [roleWithPlant] = await db
+      .select({ id: userRoles.id })
+      .from(userRoles)
+      .where(and(
+        eq(userRoles.userId, userId),
+        eq(userRoles.plantId, plantId)
+      ))
+      .limit(1);
+
+    if (roleWithPlant) return true;
+
+    // 3. Company-wide role for the plant's owning company
+    const [roleCompanyWide] = await db
+      .select({ id: userRoles.id })
+      .from(userRoles)
+      .innerJoin(plants, eq(userRoles.companyId, plants.companyId))
+      .where(and(
+        eq(userRoles.userId, userId),
+        eq(plants.id, plantId),
+        isNull(userRoles.plantId)
+      ))
+      .limit(1);
+
+    return !!roleCompanyWide;
   }
 
   /**
@@ -163,26 +194,34 @@ export class PermissionService {
     plantId?: string
   ): Promise<Set<string>> {
     // Step 1: Get all role-based permissions
-    // Include roles with no plant scope (apply everywhere) AND
-    // roles scoped to this specific plant (if plantId provided)
-    const plantCondition = plantId
-      ? or(isNull(userRoles.plantId), eq(userRoles.plantId, plantId))
-      : isNull(userRoles.plantId);
+    // If plantId is provided, include company-wide roles + roles scoped to this plant.
+    // If plantId is omitted (company-level view/check), all roles in this company apply.
+    const roleConditions = [
+      eq(userRoles.userId, userId),
+      eq(userRoles.companyId, companyId),
+    ];
+    if (plantId) {
+      roleConditions.push(or(isNull(userRoles.plantId), eq(userRoles.plantId, plantId))!);
+    }
 
     const roleBased = await db
       .select({ code: permissions.code })
       .from(userRoles)
       .innerJoin(rolePermissions, eq(rolePermissions.roleId, userRoles.roleId))
       .innerJoin(permissions, eq(permissions.id, rolePermissions.permissionId))
-      .where(and(
-        eq(userRoles.userId, userId),
-        eq(userRoles.companyId, companyId),
-        plantCondition
-      ));
+      .where(and(...roleConditions));
 
     const permSet = new Set(roleBased.map((r) => r.code));
 
     // Step 2: Apply direct user_permissions overrides
+    const overrideConditions = [
+      eq(userPermissions.userId, userId),
+      eq(userPermissions.companyId, companyId),
+    ];
+    if (plantId) {
+      overrideConditions.push(or(isNull(userPermissions.plantId), eq(userPermissions.plantId, plantId))!);
+    }
+
     const overrides = await db
       .select({
         code: permissions.code,
@@ -190,11 +229,7 @@ export class PermissionService {
       })
       .from(userPermissions)
       .innerJoin(permissions, eq(permissions.id, userPermissions.permissionId))
-      .where(and(
-        eq(userPermissions.userId, userId),
-        eq(userPermissions.companyId, companyId),
-        or(isNull(userPermissions.plantId), plantId ? eq(userPermissions.plantId, plantId) : isNull(userPermissions.plantId))
-      ));
+      .where(and(...overrideConditions));
 
     for (const { code, isGranted } of overrides) {
       if (isGranted) {

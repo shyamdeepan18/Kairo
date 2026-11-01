@@ -1,6 +1,22 @@
 import { FastifyPluginAsync } from 'fastify';
-import { db, stockLedgerEntries, items, warehouses, journalEntryLines, journalEntries, chartOfAccounts } from '@erp/db';
-import { eq, and, gte, lte, asc } from 'drizzle-orm';
+import {
+  db,
+  stockLedgerEntries,
+  stockBalances,
+  items,
+  warehouses,
+  journalEntryLines,
+  journalEntries,
+  chartOfAccounts,
+  salesInvoices,
+  salesReceipts,
+  purchaseOrders,
+  purchaseInvoices,
+  purchasePayments,
+  approvalRequests,
+  customers,
+} from '@erp/db';
+import { eq, and, gte, lte, asc, desc } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { resolveTenantContext, tenant } from '../middleware/tenant-context.js';
@@ -368,6 +384,343 @@ const reportsRoutes: FastifyPluginAsync = async (fastify) => {
     } catch (error) {
       request.log.error(error);
       reply.status(500).send({ error: 'Failed to fetch Sales Profitability Report' });
+    }
+  });
+
+  // ─── PARTY LEDGER (AR / AP TRANSACTIONS) ──────────────────────────────────
+  fastify.get('/party-ledger/:partyId', async (request, reply) => {
+    try {
+      const { companyId } = tenant(request);
+      const { partyId } = request.params as { partyId: string };
+      const { partyType } = (request.query as { partyType?: 'customer' | 'supplier' }) || {};
+
+      // 1. Try real GL journal entry lines first
+      const glEntries = await db
+        .select({
+          id: journalEntryLines.id,
+          date: journalEntries.postingDate,
+          ref: sql<string>`COALESCE(${journalEntries.documentNumber}, ${journalEntries.entryNumber}, 'JV')`,
+          type: sql<string>`COALESCE(${journalEntries.documentType}, 'JOURNAL_ENTRY')`,
+          desc: sql<string>`COALESCE(${journalEntryLines.narration}, ${journalEntries.narration}, 'General Ledger Entry')`,
+          dr: sql<number>`${journalEntryLines.debitAmountPaise} / 100.0`,
+          cr: sql<number>`${journalEntryLines.creditAmountPaise} / 100.0`,
+          status: journalEntries.status,
+        })
+        .from(journalEntryLines)
+        .innerJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
+        .where(
+          and(
+            eq(journalEntries.companyId, companyId),
+            eq(journalEntryLines.partyId, partyId)
+          )
+        )
+        .orderBy(asc(journalEntries.postingDate), asc(journalEntries.createdAt));
+
+      let rows: any[] = [];
+      const isAp = partyType === 'supplier';
+
+      if (glEntries.length > 0) {
+        let runningBalance = 0;
+        rows = glEntries.map((e) => {
+          const dr = Number(e.dr) || 0;
+          const cr = Number(e.cr) || 0;
+          if (isAp) {
+            runningBalance += cr - dr;
+          } else {
+            runningBalance += dr - cr;
+          }
+          return {
+            id: e.id,
+            date: e.date,
+            ref: e.ref,
+            type: e.type,
+            desc: e.desc,
+            dr,
+            cr,
+            balance: Math.round(runningBalance * 100) / 100,
+            status: String(e.status).toUpperCase(),
+          };
+        });
+      } else {
+        // Fallback: If no GL entries yet, check direct subledger invoices and vouchers
+        const txList: any[] = [];
+
+        if (partyType === 'customer' || !partyType) {
+          const custInvoices = await db
+            .select({
+              id: salesInvoices.id,
+              date: salesInvoices.postingDate,
+              ref: salesInvoices.documentNumber,
+              totalAmountPaise: salesInvoices.totalAmountPaise,
+              remarks: salesInvoices.remarks,
+              status: salesInvoices.status,
+            })
+            .from(salesInvoices)
+            .where(and(eq(salesInvoices.companyId, companyId), eq(salesInvoices.customerId, partyId)));
+
+          for (const inv of custInvoices) {
+            txList.push({
+              id: inv.id,
+              date: inv.date,
+              ref: inv.ref,
+              type: 'SALES_INVOICE',
+              desc: inv.remarks || 'Sales Invoice',
+              dr: (inv.totalAmountPaise || 0) / 100,
+              cr: 0,
+              status: inv.status.toUpperCase(),
+            });
+          }
+
+          const custReceipts = await db
+            .select({
+              id: salesReceipts.id,
+              date: salesReceipts.postingDate,
+              ref: salesReceipts.documentNumber,
+              receivedAmountPaise: salesReceipts.receivedAmountPaise,
+              mode: salesReceipts.receiptMode,
+              status: salesReceipts.status,
+            })
+            .from(salesReceipts)
+            .where(and(eq(salesReceipts.companyId, companyId), eq(salesReceipts.customerId, partyId)));
+
+          for (const rc of custReceipts) {
+            txList.push({
+              id: rc.id,
+              date: rc.date,
+              ref: rc.ref,
+              type: 'PAYMENT_RECEIPT',
+              desc: `Receipt via ${rc.mode}`,
+              dr: 0,
+              cr: (rc.receivedAmountPaise || 0) / 100,
+              status: rc.status.toUpperCase(),
+            });
+          }
+        }
+
+        if (partyType === 'supplier' || (partyType !== 'customer' && txList.length === 0)) {
+          const suppInvoices = await db
+            .select({
+              id: purchaseInvoices.id,
+              date: purchaseInvoices.postingDate,
+              ref: purchaseInvoices.documentNumber,
+              totalAmountPaise: purchaseInvoices.totalAmountPaise,
+              supplierInvoiceNumber: purchaseInvoices.supplierInvoiceNumber,
+              status: purchaseInvoices.status,
+            })
+            .from(purchaseInvoices)
+            .where(and(eq(purchaseInvoices.companyId, companyId), eq(purchaseInvoices.supplierId, partyId)));
+
+          for (const inv of suppInvoices) {
+            txList.push({
+              id: inv.id,
+              date: inv.date,
+              ref: inv.ref,
+              type: 'PURCHASE_INVOICE',
+              desc: inv.supplierInvoiceNumber ? `Vendor Inv #${inv.supplierInvoiceNumber}` : 'Purchase Intake',
+              dr: 0,
+              cr: (inv.totalAmountPaise || 0) / 100,
+              status: inv.status.toUpperCase(),
+            });
+          }
+
+          const suppPayments = await db
+            .select({
+              id: purchasePayments.id,
+              date: purchasePayments.postingDate,
+              ref: purchasePayments.documentNumber,
+              paidAmountPaise: purchasePayments.paidAmountPaise,
+              mode: purchasePayments.paymentMode,
+              status: purchasePayments.status,
+            })
+            .from(purchasePayments)
+            .where(and(eq(purchasePayments.companyId, companyId), eq(purchasePayments.supplierId, partyId)));
+
+          for (const pm of suppPayments) {
+            txList.push({
+              id: pm.id,
+              date: pm.date,
+              ref: pm.ref,
+              type: 'PAYMENT_VOUCHER',
+              desc: `Payment via ${pm.mode}`,
+              dr: (pm.paidAmountPaise || 0) / 100,
+              cr: 0,
+              status: pm.status.toUpperCase(),
+            });
+          }
+        }
+
+        txList.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        let runningBalance = 0;
+        rows = txList.map((t) => {
+          if (isAp) {
+            runningBalance += t.cr - t.dr;
+          } else {
+            runningBalance += t.dr - t.cr;
+          }
+          return {
+            ...t,
+            balance: Math.round(runningBalance * 100) / 100,
+          };
+        });
+      }
+
+      return rows;
+    } catch (error) {
+      request.log.error(error);
+      reply.status(500).send({ error: 'Failed to fetch party ledger' });
+    }
+  });
+
+  // ─── DASHBOARD KPIS & EXECUTIVE OVERVIEW ──────────────────────────────────
+  fastify.get('/dashboard-kpis', async (request, reply) => {
+    try {
+      const { companyId } = tenant(request);
+
+      // 1. Today's sales revenue (from approved sales invoices posted today)
+      const [todaySalesRes] = await db
+        .select({
+          totalRevenuePaise: sql<number>`COALESCE(SUM(${salesInvoices.totalAmountPaise}), 0)`.mapWith(Number),
+          invoiceCount: sql<number>`COUNT(*)::int`.mapWith(Number),
+        })
+        .from(salesInvoices)
+        .where(
+          and(
+            eq(salesInvoices.companyId, companyId),
+            eq(salesInvoices.status, 'approved'),
+            eq(salesInvoices.postingDate, sql`CURRENT_DATE`)
+          )
+        );
+
+      // 2. Open Purchase Orders (submitted or approved, awaiting completion)
+      const [openPoRes] = await db
+        .select({
+          openPoCount: sql<number>`COUNT(*)::int`.mapWith(Number),
+          openPoAmountPaise: sql<number>`COALESCE(SUM(${purchaseOrders.totalAmountPaise}), 0)`.mapWith(Number),
+        })
+        .from(purchaseOrders)
+        .where(
+          and(
+            eq(purchaseOrders.companyId, companyId),
+            sql`${purchaseOrders.status} IN ('submitted', 'approved')`
+          )
+        );
+
+      // 3. Outstanding Receivables (approved sales invoices minus received amount)
+      const [receivablesRes] = await db
+        .select({
+          totalOutstandingPaise: sql<number>`COALESCE(SUM(${salesInvoices.totalAmountPaise} - COALESCE(${salesInvoices.receivedAmountPaise}, 0)), 0)`.mapWith(Number),
+        })
+        .from(salesInvoices)
+        .where(
+          and(
+            eq(salesInvoices.companyId, companyId),
+            eq(salesInvoices.status, 'approved')
+          )
+        );
+
+      // 4. Outstanding Payables (approved purchase invoices minus paid amount)
+      const [payablesRes] = await db
+        .select({
+          totalOutstandingPaise: sql<number>`COALESCE(SUM(${purchaseInvoices.totalAmountPaise} - COALESCE(${purchaseInvoices.paidAmountPaise}, 0)), 0)`.mapWith(Number),
+        })
+        .from(purchaseInvoices)
+        .where(
+          and(
+            eq(purchaseInvoices.companyId, companyId),
+            eq(purchaseInvoices.status, 'approved')
+          )
+        );
+
+      // 5. Low Stock Items count & sample
+      const lowStockList = await db
+        .select({
+          itemId: stockBalances.itemId,
+          itemCode: items.itemCode,
+          itemName: items.itemName,
+          quantityOnHand: stockBalances.quantityOnHand,
+          warehouseName: warehouses.name,
+        })
+        .from(stockBalances)
+        .innerJoin(items, eq(stockBalances.itemId, items.id))
+        .leftJoin(warehouses, eq(stockBalances.warehouseId, warehouses.id))
+        .where(
+          and(
+            eq(stockBalances.companyId, companyId),
+            sql`${stockBalances.quantityOnHand} <= 10`
+          )
+        )
+        .limit(5);
+
+      const [lowStockCountRes] = await db
+        .select({ count: sql<number>`COUNT(DISTINCT ${stockBalances.itemId})::int`.mapWith(Number) })
+        .from(stockBalances)
+        .where(
+          and(
+            eq(stockBalances.companyId, companyId),
+            sql`${stockBalances.quantityOnHand} <= 10`
+          )
+        );
+
+      // 6. Pending Approvals count & sample
+      const pendingApprovals = await db
+        .select({
+          id: approvalRequests.id,
+          documentType: approvalRequests.documentType,
+          documentNumber: approvalRequests.documentNumber,
+          amountPaise: approvalRequests.amountPaise,
+          currentLevel: approvalRequests.currentLevel,
+          createdAt: approvalRequests.createdAt,
+        })
+        .from(approvalRequests)
+        .where(
+          and(
+            eq(approvalRequests.companyId, companyId),
+            eq(approvalRequests.status, 'pending')
+          )
+        )
+        .orderBy(desc(approvalRequests.createdAt))
+        .limit(5);
+
+      // 7. Recent Invoices / Activity
+      const recentSales = await db
+        .select({
+          id: salesInvoices.id,
+          documentNumber: salesInvoices.documentNumber,
+          customerName: customers.name,
+          totalAmountPaise: salesInvoices.totalAmountPaise,
+          postingDate: salesInvoices.postingDate,
+          status: salesInvoices.status,
+        })
+        .from(salesInvoices)
+        .innerJoin(customers, eq(salesInvoices.customerId, customers.id))
+        .where(eq(salesInvoices.companyId, companyId))
+        .orderBy(desc(salesInvoices.postingDate), desc(salesInvoices.createdAt))
+        .limit(5);
+
+      return {
+        todaySales: {
+          revenuePaise: todaySalesRes?.totalRevenuePaise || 0,
+          ordersCount: todaySalesRes?.invoiceCount || 0,
+        },
+        openPurchaseOrders: {
+          count: openPoRes?.openPoCount || 0,
+          amountPaise: openPoRes?.openPoAmountPaise || 0,
+        },
+        outstandingReceivablesPaise: receivablesRes?.totalOutstandingPaise || 0,
+        outstandingPayablesPaise: payablesRes?.totalOutstandingPaise || 0,
+        lowStock: {
+          count: lowStockCountRes?.count || 0,
+          items: lowStockList,
+        },
+        pendingApprovals: {
+          count: pendingApprovals.length,
+          requests: pendingApprovals,
+        },
+        recentSales,
+      };
+    } catch (error) {
+      request.log.error(error);
+      reply.status(500).send({ error: 'Failed to fetch dashboard KPIs' });
     }
   });
 };

@@ -6,6 +6,7 @@ import { sql } from 'drizzle-orm';
 import { companies, plants, warehouses } from './company.js';
 import { users } from './auth.js';
 import { items, itemBatches } from './inventory.js';
+import { suppliers } from './purchase.js';
 
 // ─── Phase 8 — Manufacturing (hybrid discrete + process) ────────────────────
 //
@@ -395,3 +396,127 @@ export type ProductionOrderMaterial = typeof productionOrderMaterials.$inferSele
 export type ProductionOrderOutput = typeof productionOrderOutputs.$inferSelect;
 export type ProductionOrderOperation = typeof productionOrderOperations.$inferSelect;
 export type ProductionOrderCost = typeof productionOrderCosts.$inferSelect;
+
+// ─── Subcontracting & Outside Job Work (GAP 4) ──────────────────────────────
+
+export const jobWorkOrders = pgTable(
+  'job_work_orders',
+  {
+    ...documentHeader('manufacturing.job_work_order'),
+    vendorId: uuid('vendor_id').notNull().references(() => suppliers.id),
+    vendorWarehouseId: uuid('vendor_warehouse_id').notNull().references(() => warehouses.id),
+    targetItemId: uuid('target_item_id').notNull().references(() => items.id),
+    targetQty: qty('target_qty').notNull(),
+    uom: varchar('uom', { length: 20 }).notNull(),
+    serviceRatePaise: money('service_rate_paise').notNull(),
+    serviceTaxCodeId: uuid('service_tax_code_id'),
+    totalServicePaise: money('total_service_paise').notNull().default(0),
+    issuedQty: qty('issued_qty').default('0').notNull(),
+    receivedQty: qty('received_qty').default('0').notNull(),
+    expectedCompletionDate: date('expected_completion_date'),
+    projectId: uuid('project_id'),
+  },
+  (t) => ({
+    numberUq: unique('job_work_orders_number_uq').on(t.companyId, t.documentNumber),
+    vendorIdx: index('job_work_orders_vendor_idx').on(t.vendorId),
+    statusIdx: index('job_work_orders_status_idx').on(t.status),
+    targetItemIdx: index('job_work_orders_target_item_idx').on(t.targetItemId),
+  })
+);
+
+export const jobWorkOrderMaterials = pgTable(
+  'job_work_order_materials',
+  {
+    id: uuid('id').default(sql`gen_random_uuid()`).primaryKey(),
+    companyId: uuid('company_id').notNull().references(() => companies.id),
+    jobWorkOrderId: uuid('job_work_order_id').notNull().references(() => jobWorkOrders.id, { onDelete: 'cascade' }),
+    itemId: uuid('item_id').notNull().references(() => items.id),
+    plannedQty: qty('planned_qty').notNull(),
+    issuedQty: qty('issued_qty').default('0').notNull(),
+    consumedQty: qty('consumed_qty').default('0').notNull(),
+    uom: varchar('uom', { length: 20 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    orderIdx: index('jwom_order_idx').on(t.jobWorkOrderId),
+    itemIdx: index('jwom_item_idx').on(t.itemId),
+  })
+);
+
+export const jobWorkChallans = pgTable(
+  'job_work_challans',
+  {
+    ...documentHeader('manufacturing.job_work_challan'),
+    jobWorkOrderId: uuid('job_work_order_id').notNull().references(() => jobWorkOrders.id),
+    vendorId: uuid('vendor_id').notNull().references(() => suppliers.id),
+    sourceWarehouseId: uuid('source_warehouse_id').notNull().references(() => warehouses.id),
+    vendorWarehouseId: uuid('vendor_warehouse_id').notNull().references(() => warehouses.id),
+    vehicleNumber: varchar('vehicle_number', { length: 30 }),
+    ewayBillNumber: varchar('eway_bill_number', { length: 50 }),
+    projectId: uuid('project_id'),
+  },
+  (t) => ({
+    numberUq: unique('job_work_challans_number_uq').on(t.companyId, t.documentNumber),
+    orderIdx: index('jwc_order_idx').on(t.jobWorkOrderId),
+    vendorIdx: index('jwc_vendor_idx').on(t.vendorId),
+  })
+);
+
+export const jobWorkChallanLines = pgTable(
+  'job_work_challan_lines',
+  {
+    id: uuid('id').default(sql`gen_random_uuid()`).primaryKey(),
+    challanId: uuid('challan_id').notNull().references(() => jobWorkChallans.id, { onDelete: 'cascade' }),
+    itemId: uuid('item_id').notNull().references(() => items.id),
+    quantity: qty('quantity').notNull(),
+    uom: varchar('uom', { length: 20 }).notNull(),
+    batchId: uuid('batch_id').references(() => itemBatches.id),
+    batchNumber: varchar('batch_number', { length: 100 }),
+    ratePaise: money('rate_paise').default(0).notNull(),
+    amountPaise: money('amount_paise').default(0).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    challanIdx: index('jwcl_challan_idx').on(t.challanId),
+    itemIdx: index('jwcl_item_idx').on(t.itemId),
+  })
+);
+
+export const jobWorkReceipts = pgTable(
+  'job_work_receipts',
+  {
+    ...documentHeader('manufacturing.job_work_receipt'),
+    jobWorkOrderId: uuid('job_work_order_id').notNull().references(() => jobWorkOrders.id),
+    vendorId: uuid('vendor_id').notNull().references(() => suppliers.id),
+    targetItemId: uuid('target_item_id').notNull().references(() => items.id),
+    receivedQty: qty('received_qty').notNull(),
+    uom: varchar('uom', { length: 20 }).notNull(),
+    destinationWarehouseId: uuid('destination_warehouse_id').notNull().references(() => warehouses.id),
+    vendorWarehouseId: uuid('vendor_warehouse_id').notNull().references(() => warehouses.id),
+    batchNumber: varchar('batch_number', { length: 100 }),
+    batchExpiryDate: date('batch_expiry_date'),
+    rawMaterialCostPaise: money('raw_material_cost_paise').default(0).notNull(),
+    serviceChargePaise: money('service_charge_paise').default(0).notNull(),
+    totalCostPaise: money('total_cost_paise').default(0).notNull(),
+    unitCostPaise: money('unit_cost_paise').default(0).notNull(),
+    journalEntryId: uuid('journal_entry_id'),
+    projectId: uuid('project_id'),
+  },
+  (t) => ({
+    numberUq: unique('job_work_receipts_number_uq').on(t.companyId, t.documentNumber),
+    orderIdx: index('jwr_order_idx').on(t.jobWorkOrderId),
+    vendorIdx: index('jwr_vendor_idx').on(t.vendorId),
+  })
+);
+
+export type JobWorkOrder = typeof jobWorkOrders.$inferSelect;
+export type NewJobWorkOrder = typeof jobWorkOrders.$inferInsert;
+export type JobWorkOrderMaterial = typeof jobWorkOrderMaterials.$inferSelect;
+export type NewJobWorkOrderMaterial = typeof jobWorkOrderMaterials.$inferInsert;
+export type JobWorkChallan = typeof jobWorkChallans.$inferSelect;
+export type NewJobWorkChallan = typeof jobWorkChallans.$inferInsert;
+export type JobWorkChallanLine = typeof jobWorkChallanLines.$inferSelect;
+export type NewJobWorkChallanLine = typeof jobWorkChallanLines.$inferInsert;
+export type JobWorkReceipt = typeof jobWorkReceipts.$inferSelect;
+export type NewJobWorkReceipt = typeof jobWorkReceipts.$inferInsert;

@@ -34,15 +34,25 @@ export const inventoryApi = {
       api.get(`${BASE}/transfers/${id}`).then((r) => r.data),
     create: (body: Record<string, unknown>) =>
       api.post(`${BASE}/transfers`, body).then((r) => r.data),
+    update: (id: string, body: Record<string, unknown>) =>
+      api.patch(`${BASE}/transfers/${id}`, body).then((r) => r.data),
+    remove: (id: string, _companyId: string) =>
+      api.delete(`${BASE}/transfers/${id}`).then((r) => r.data),
     submit: (id: string, _companyId: string) =>
       api.post(`${BASE}/transfers/${id}/submit`, {}).then((r) => r.data),
     approve: (id: string, _companyId: string) =>
       api.post(`${BASE}/transfers/${id}/approve`, {}).then((r) => r.data),
-    receive: (id: string, _companyId: string) =>
-      api.post(`${BASE}/transfers/${id}/receive`, {}).then((r) => r.data),
+    receive: (id: string, body?: Record<string, unknown>) =>
+      api.post(`${BASE}/transfers/${id}/receive`, body ?? {}).then((r) => r.data),
     reject:  (id: string, _companyId: string) =>
       api.post(`${BASE}/transfers/${id}/reject`, {}).then((r) => r.data),
+    reopen:  (id: string, _companyId: string) =>
+      api.post(`${BASE}/transfers/${id}/reopen`, {}).then((r) => r.data),
+    cancel:  (id: string, _companyId: string) =>
+      api.post(`${BASE}/transfers/${id}/cancel`, {}).then((r) => r.data),
   },
+  itemBatches: (_companyId: string, itemId: string) =>
+    api.get(`${BASE}/items/${itemId}/batches`).then((r) => r.data.data as Array<{ id: string; batchNumber: string; expiryDate: string | null; qcStatus: string }>),
 };
 
 export const invErr = (e: any): string =>

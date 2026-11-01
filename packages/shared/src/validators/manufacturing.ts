@@ -136,3 +136,70 @@ export type FormulaCreateInput = z.infer<typeof formulaCreateSchema>;
 export type ProductionOrderCreateInput = z.infer<typeof productionOrderCreateSchema>;
 export type IssueMaterialsInput = z.infer<typeof issueMaterialsSchema>;
 export type RecordOutputInput = z.infer<typeof recordOutputSchema>;
+
+// ─── Subcontracting & Outside Job Work (GAP 4) ──────────────────────────────
+
+export const jobWorkOrderCreateSchema = z.object({
+  plantId: uuid,
+  postingDate: isoDate,
+  vendorId: uuid,
+  vendorWarehouseId: uuid,
+  targetItemId: uuid,
+  targetQty: qty,
+  uom: z.string().min(1).max(20),
+  serviceRatePaise: paisePos,
+  serviceTaxCodeId: uuid.optional(),
+  expectedCompletionDate: isoDate.optional(),
+  projectId: uuid.optional(),
+  remarks: z.string().optional(),
+  materials: z.array(
+    z.object({
+      itemId: uuid,
+      plannedQty: qty,
+      uom: z.string().min(1).max(20),
+    })
+  ).min(1, 'At least 1 raw material input is required'),
+}).strict();
+
+export const jobWorkChallanCreateSchema = z.object({
+  plantId: uuid,
+  postingDate: isoDate,
+  jobWorkOrderId: uuid,
+  sourceWarehouseId: uuid,
+  vehicleNumber: z.string().optional(),
+  ewayBillNumber: z.string().optional(),
+  remarks: z.string().optional(),
+  lines: z.array(
+    z.object({
+      itemId: uuid,
+      quantity: qty,
+      uom: z.string().min(1).max(20),
+      batchId: uuid.optional(),
+      batchNumber: z.string().optional(),
+    })
+  ).min(1, 'At least 1 challan line is required'),
+}).strict();
+
+export const jobWorkReceiptCreateSchema = z.object({
+  plantId: uuid,
+  postingDate: isoDate,
+  jobWorkOrderId: uuid,
+  destinationWarehouseId: uuid,
+  receivedQty: qty,
+  uom: z.string().min(1).max(20),
+  batchNumber: z.string().optional(),
+  batchExpiryDate: isoDate.optional(),
+  remarks: z.string().optional(),
+  rawMaterialsConsumed: z.array(
+    z.object({
+      itemId: uuid,
+      quantity: qty,
+      uom: z.string().min(1).max(20),
+      batchId: uuid.optional(),
+    })
+  ).optional(),
+}).strict();
+
+export type JobWorkOrderCreateInput = z.infer<typeof jobWorkOrderCreateSchema>;
+export type JobWorkChallanCreateInput = z.infer<typeof jobWorkChallanCreateSchema>;
+export type JobWorkReceiptCreateInput = z.infer<typeof jobWorkReceiptCreateSchema>;

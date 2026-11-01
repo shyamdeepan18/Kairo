@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import { Button, Drawer, Form, DatePicker, Select, Input, InputNumber, Popconfirm, message } from 'antd';
 import { 
   ArrowRightLeft, Plus, Trash2, CheckCircle2, XCircle, Search, 
-  ArrowUpCircle, ArrowDownCircle, AlertTriangle 
+  ArrowUpCircle, ArrowDownCircle, AlertTriangle, FileText, Calendar, 
+  DollarSign, Clock, ShieldCheck, ClipboardList 
 } from 'lucide-react';
 import dayjs from 'dayjs';
 import { usePlantStore } from '../../store/plant';
@@ -110,39 +111,138 @@ export function StockAdjustmentsPage() {
     }
   };
 
+  const [searchQuery, setSearchQuery] = useState('');
+  const filteredRows = useMemo(() => {
+    if (!searchQuery.trim()) return rows;
+    const q = searchQuery.toLowerCase();
+    return rows.filter((r) =>
+      r.documentNumber.toLowerCase().includes(q) ||
+      (r.reason && r.reason.toLowerCase().includes(q))
+    );
+  }, [rows, searchQuery]);
+
+  const totalAdjustments = rows.length;
+  const totalAdjustedValuePaise = useMemo(() => {
+    return rows.reduce((acc, r) => acc + (r.totalAmountPaise || 0), 0);
+  }, [rows]);
+  const pendingAdjustments = rows.filter((r) => r.status === 'draft' || r.status === 'submitted').length;
+  const approvedAdjustments = rows.filter((r) => r.status === 'approved').length;
+
   return (
-    <div className="h-full flex flex-col bg-slate-50 dark:bg-slate-900 transition-colors">
-      <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 py-6 flex justify-between items-center shrink-0 transition-colors relative z-10">
-        <div className="flex items-center space-x-3">
-          <div className="p-2 bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded-lg">
+    <div className="h-full flex flex-col bg-slate-50 dark:bg-slate-950 min-h-screen text-slate-900 dark:text-slate-100 transition-colors">
+      {/* Universal Page Header Bar */}
+      <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0 shadow-xs">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 border border-amber-100 dark:border-amber-900/40 rounded-xl">
             <ArrowRightLeft className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-slate-900 dark:text-white transition-colors">Stock Adjustments</h1>
-            <p className="text-sm text-slate-500 dark:text-slate-400 transition-colors">Physical count corrections & write-offs — GL posted on approval</p>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold tracking-wider text-slate-500 dark:text-slate-400 uppercase">Inventory</span>
+              <span className="text-xs text-slate-300 dark:text-slate-700">/</span>
+              <span className="text-xs font-medium text-amber-600 dark:text-amber-400">Adjustments</span>
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+              Stock Adjustments
+            </h1>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Physical count audits, cycle count reconciliations, and inventory write-offs (posts movement & GL)
+            </p>
           </div>
         </div>
-        <button 
-          onClick={() => {
-            form.resetFields();
-            form.setFieldsValue({ postingDate: dayjs(), adjustmentType: 'physical_count' });
-            setLines([newLine()]);
-            setDrawer(true);
-          }}
-          className="flex items-center px-4 py-2 bg-emerald-600 dark:bg-emerald-600/90 text-white font-bold rounded-lg shadow-sm hover:bg-emerald-700 dark:hover:bg-emerald-500 transition-colors"
-        >
-          <Plus className="w-4 h-4 mr-2" /> New Adjustment
-        </button>
+
+        <div className="flex items-center gap-3">
+          <button 
+            type="button"
+            onClick={() => {
+              form.resetFields();
+              form.setFieldsValue({ postingDate: dayjs(), adjustmentType: 'physical_count' });
+              setLines([newLine()]);
+              setDrawer(true);
+            }}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white rounded-xl shadow-xs text-sm font-semibold transition-all cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            New Adjustment
+          </button>
+        </div>
       </div>
 
-      <div className="flex-1 p-6 overflow-auto">
-        <div className="mb-4 flex items-center space-x-4">
-          <div className="relative">
+      {/* Main Content Area */}
+      <div className="p-6 max-w-7xl mx-auto w-full flex-1 flex flex-col gap-6">
+        {/* KPI Stats Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+              <span className="text-xs font-semibold uppercase tracking-wider">Total Adjustments</span>
+              <div className="p-2 bg-amber-50 dark:bg-amber-950/60 rounded-xl text-amber-600 dark:text-amber-400">
+                <ArrowRightLeft className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="mt-2 text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+              {totalAdjustments}
+            </div>
+            <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Physical audits logged
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+              <span className="text-xs font-semibold uppercase tracking-wider">Net Value Shift</span>
+              <div className="p-2 bg-blue-50 dark:bg-blue-950/60 rounded-xl text-blue-600 dark:text-blue-400">
+                <DollarSign className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="mt-2 text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+              <AmountDisplay paise={totalAdjustedValuePaise} />
+            </div>
+            <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Inventory valuation variance
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+              <span className="text-xs font-semibold uppercase tracking-wider">Pending Approvals</span>
+              <div className="p-2 bg-amber-50 dark:bg-amber-950/60 rounded-xl text-amber-600 dark:text-amber-400">
+                <Clock className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="mt-2 text-2xl font-bold tracking-tight text-amber-600 dark:text-amber-400">
+              {pendingAdjustments}
+            </div>
+            <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Awaiting audit sign-off
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+              <span className="text-xs font-semibold uppercase tracking-wider">Approved & Reconciled</span>
+              <div className="p-2 bg-emerald-50 dark:bg-emerald-950/60 rounded-xl text-emerald-600 dark:text-emerald-400">
+                <ShieldCheck className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="mt-2 text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">
+              {approvedAdjustments}
+            </div>
+            <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Movement ledger posted
+            </div>
+          </div>
+        </div>
+
+        {/* Filter Bar */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-xs flex flex-col sm:flex-row gap-3 items-center justify-between">
+          <div className="relative w-full sm:w-80">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
             <input 
               type="text" 
-              placeholder="Search documents..." 
-              className="pl-9 pr-4 py-2 w-64 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-lg text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-colors"
+              placeholder="Search documents or reasons..." 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-4 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 dark:text-white"
             />
           </div>
           <Select 
@@ -150,12 +250,27 @@ export function StockAdjustmentsPage() {
             placeholder="All Statuses" 
             value={statusFilter} 
             onChange={setStatusFilter} 
-            style={{ minWidth: 150 }} 
+            className="w-44" 
             options={STATUS_OPTIONS} 
           />
         </div>
 
-        <div className="bg-white dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden transition-colors min-h-[400px]">
+        {/* Table Container Card */}
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center">
+            <div>
+              <h3 className="font-semibold text-slate-900 dark:text-white">
+                Adjustment Registry
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Physical inventory corrections and variance ledger adjustments
+              </p>
+            </div>
+            <span className="text-xs font-mono px-2.5 py-1 bg-slate-100 dark:bg-slate-800 rounded-lg text-slate-600 dark:text-slate-400">
+              {filteredRows.length} adjustments
+            </span>
+          </div>
+
           <table className="w-full text-sm text-left">
             <thead className="text-xs text-slate-500 dark:text-slate-400 uppercase bg-slate-50/50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 transition-colors">
               <tr>
@@ -168,10 +283,13 @@ export function StockAdjustmentsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
-              {rows.map(r => (
+              {filteredRows.map(r => (
                 <tr key={r.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition-colors group">
                   <td className="px-6 py-4">
-                    <span className="font-mono font-bold text-cyan-700 dark:text-cyan-400 transition-colors">{r.documentNumber}</span>
+                    <div className="flex items-center space-x-2">
+                      <FileText className="w-4 h-4 text-slate-400 dark:text-slate-500" />
+                      <span className="font-mono font-bold text-amber-700 dark:text-amber-400 transition-colors">{r.documentNumber}</span>
+                    </div>
                   </td>
                   <td className="px-6 py-4 text-slate-500 dark:text-slate-400 font-medium transition-colors">{r.postingDate}</td>
                   <td className="px-6 py-4 text-slate-800 dark:text-slate-200 font-bold capitalize transition-colors">{r.adjustmentType?.replace('_', ' ')}</td>
@@ -184,16 +302,16 @@ export function StockAdjustmentsPage() {
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end space-x-2">
                       {r.status === 'draft' && (
-                        <button onClick={() => act(r, 'submit')} className="text-cyan-600 dark:text-cyan-400 hover:text-cyan-800 dark:hover:text-cyan-300 text-xs font-bold transition-colors">
+                        <button onClick={() => act(r, 'submit')} className="text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 text-xs font-bold transition-colors cursor-pointer">
                           Submit
                         </button>
                       )}
                       {r.status === 'submitted' && (
                         <>
-                          <button onClick={() => act(r, 'approve')} className="flex items-center text-emerald-600 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 text-xs font-bold transition-colors">
+                          <button onClick={() => act(r, 'approve')} className="flex items-center text-emerald-600 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 text-xs font-bold transition-colors cursor-pointer">
                             <CheckCircle2 className="w-4 h-4 mr-1" /> Approve
                           </button>
-                          <button onClick={() => act(r, 'reject')} className="flex items-center text-rose-600 dark:text-rose-400 hover:text-rose-800 dark:hover:text-rose-300 text-xs font-bold transition-colors ml-3">
+                          <button onClick={() => act(r, 'reject')} className="flex items-center text-rose-600 dark:text-rose-400 hover:text-rose-800 dark:hover:text-rose-300 text-xs font-bold transition-colors ml-3 cursor-pointer">
                             <XCircle className="w-4 h-4 mr-1" /> Reject
                           </button>
                         </>
@@ -202,7 +320,7 @@ export function StockAdjustmentsPage() {
                   </td>
                 </tr>
               ))}
-              {rows.length === 0 && !loading && (
+              {filteredRows.length === 0 && !loading && (
                 <tr>
                   <td colSpan={6} className="px-6 py-12 text-center text-slate-500 dark:text-slate-400 transition-colors">
                     <AlertTriangle className="w-8 h-8 mx-auto mb-2 opacity-50" />

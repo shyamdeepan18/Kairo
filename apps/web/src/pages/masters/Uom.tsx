@@ -5,6 +5,7 @@ import {
   InputNumber, message, Tabs, Row, Col, theme as antTheme,
 } from 'antd';
 import { PlusOutlined, ArrowRightOutlined } from '@ant-design/icons';
+import { Scale, Plus, Layers, ArrowRightLeft, Boxes } from 'lucide-react';
 import {
   mastersApi, UOM_DIMENSIONS,
   type Uom, type UomConversion,
@@ -127,50 +128,161 @@ export function UomPage() {
 
   const uomOptions = uoms.map((u) => ({ value: u.code, label: `${u.code} — ${u.name}` }));
 
+  const weightUnits = uoms.filter((u) => u.type === 'weight').length;
+  const volumeUnits = uoms.filter((u) => u.type === 'volume').length;
+
   return (
-    <div>
-      <div className="mb-5 flex justify-between items-start">
-        <div>
-          <h2 className="m-0 font-bold text-lg text-slate-900 dark:text-white">Units of Measure</h2>
-          <span className="text-[13px] text-slate-500 dark:text-slate-400">Standard and custom units, plus conversion factors.</span>
+    <div className="h-full flex flex-col bg-slate-50 dark:bg-slate-950 min-h-screen text-slate-900 dark:text-slate-100 transition-colors">
+      {/* Top Header Bar */}
+      <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0 transition-colors">
+        <div className="flex items-center space-x-3.5">
+          <div className="p-2.5 bg-cyan-50 dark:bg-cyan-950/50 text-cyan-600 dark:text-cyan-400 border border-cyan-100 dark:border-cyan-900/40 rounded-xl shadow-xs">
+            <Scale className="w-6 h-6" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mb-0.5">
+              <span>Masters</span>
+              <span>/</span>
+              <span className="text-cyan-600 dark:text-cyan-400 font-medium">Units of Measure</span>
+            </div>
+            <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
+              Units of Measure & Conversions
+            </h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Standard base units, dual-UOM catch weights, and precision conversion factors
+            </p>
+          </div>
         </div>
-        {activeTab === 'units' ? (
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => { uomForm.resetFields(); setUomDrawer(true); }}>Add Unit</Button>
-        ) : (
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => { convForm.resetFields(); setConvDrawer(true); }}>Add Conversion</Button>
-        )}
+        <div className="flex items-center gap-2">
+          {activeTab === 'units' ? (
+            <button
+              onClick={() => { uomForm.resetFields(); setUomDrawer(true); }}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-700 active:bg-cyan-800 text-white rounded-xl shadow-xs text-sm font-semibold transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
+            >
+              <Plus className="w-4 h-4" /> Add Unit
+            </button>
+          ) : (
+            <button
+              onClick={() => { convForm.resetFields(); setConvDrawer(true); }}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-700 active:bg-cyan-800 text-white rounded-xl shadow-xs text-sm font-semibold transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
+            >
+              <Plus className="w-4 h-4" /> Add Conversion
+            </button>
+          )}
+        </div>
       </div>
 
-      <Tabs
-        activeKey={activeTab}
-        onChange={setActiveTab}
-        items={[
-          {
-            key: 'units',
-            label: 'Units',
-            children: (
-              <div>
-                <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
-                  <Table dataSource={uoms} columns={uomColumns} rowKey="id" loading={loading}
-                    pagination={{ pageSize: 25, hideOnSinglePage: true }} locale={{ emptyText: 'No units yet.' }} />
-                </div>
+      {/* Main Content Area */}
+      <div className="p-6 max-w-7xl mx-auto w-full flex-1 flex flex-col gap-6">
+        {/* KPI Stats Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Total Defined Units</span>
+              <div className="p-2 bg-cyan-50 dark:bg-cyan-950/50 rounded-lg text-cyan-600 dark:text-cyan-400">
+                <Scale className="w-4 h-4" />
               </div>
-            ),
-          },
-          {
-            key: 'conversions',
-            label: 'Conversions',
-            children: (
-              <div>
-                <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
-                  <Table dataSource={conversions} columns={convColumns} rowKey="id" loading={loading}
-                    pagination={{ pageSize: 25, hideOnSinglePage: true }} locale={{ emptyText: 'No conversions defined.' }} />
-                </div>
+            </div>
+            <div className="text-2xl font-bold text-slate-900 dark:text-white mt-2">{uoms.length}</div>
+            <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">Available measurement units</div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Weight & Mass</span>
+              <div className="p-2 bg-blue-50 dark:bg-blue-950/50 rounded-lg text-blue-600 dark:text-blue-400">
+                <Boxes className="w-4 h-4" />
               </div>
-            ),
-          },
-        ]}
-      />
+            </div>
+            <div className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-2">{weightUnits}</div>
+            <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">KG, GM, MT, Quintal</div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Volume & Liquid</span>
+              <div className="p-2 bg-emerald-50 dark:bg-emerald-950/50 rounded-lg text-emerald-600 dark:text-emerald-400">
+                <Layers className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-2">{volumeUnits}</div>
+            <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">LTR, ML, Gallon</div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Conversion Factors</span>
+              <div className="p-2 bg-purple-50 dark:bg-purple-950/50 rounded-lg text-purple-600 dark:text-purple-400">
+                <ArrowRightLeft className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="text-2xl font-bold text-purple-600 dark:text-purple-400 mt-2">{conversions.length}</div>
+            <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">Configured unit multipliers</div>
+          </div>
+        </div>
+
+        {/* View Mode Tabs Bar */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-2 shadow-xs flex items-center justify-between transition-colors">
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setActiveTab('units')}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                activeTab === 'units'
+                  ? 'bg-cyan-50 dark:bg-cyan-950/50 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-800/60 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              Units of Measure ({uoms.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('conversions')}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                activeTab === 'conversions'
+                  ? 'bg-cyan-50 dark:bg-cyan-950/50 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-800/60 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              Unit Conversions ({conversions.length})
+            </button>
+          </div>
+        </div>
+
+        {/* Table Container Card */}
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden transition-colors">
+          <div className="p-4 border-b border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+                {activeTab === 'units' ? 'Measurement Units Registry' : 'Unit Conversion Registry'}
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {activeTab === 'units' ? 'All standard and discrete measurement units' : 'Dimensional conversion rules and item-specific catch weight ratios'}
+              </p>
+            </div>
+            <span className="text-xs px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-medium">
+              {activeTab === 'units' ? uoms.length : conversions.length} Records
+            </span>
+          </div>
+          {activeTab === 'units' ? (
+            <Table
+              dataSource={uoms}
+              columns={uomColumns}
+              rowKey="id"
+              loading={loading}
+              pagination={{ pageSize: 25, hideOnSinglePage: true }}
+              locale={{ emptyText: 'No units yet.' }}
+            />
+          ) : (
+            <Table
+              dataSource={conversions}
+              columns={convColumns}
+              rowKey="id"
+              loading={loading}
+              pagination={{ pageSize: 25, hideOnSinglePage: true }}
+              locale={{ emptyText: 'No conversions defined.' }}
+            />
+          )}
+        </div>
+      </div>
 
       {/* Unit drawer */}
       <Drawer

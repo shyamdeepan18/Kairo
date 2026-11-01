@@ -61,8 +61,19 @@ const PERMISSIONS = [
   { code: 'purchase.payment.approve',     module: 'purchase', documentType: 'payment',      action: 'approve', label: 'Approve purchase payments' },
   { code: 'purchase.return.view',         module: 'purchase', documentType: 'return',       action: 'view',    label: 'View purchase returns' },
   { code: 'purchase.return.create',       module: 'purchase', documentType: 'return',       action: 'create',  label: 'Create purchase returns' },
-  { code: 'purchase.return.approve',      module: 'purchase', documentType: 'return',       action: 'approve', label: 'Approve purchase returns' },
+  { code: 'purchase.debit_note.view',     module: 'purchase', documentType: 'debit_note',   action: 'view',    label: 'View purchase debit notes' },
+  { code: 'purchase.debit_note.create',   module: 'purchase', documentType: 'debit_note',   action: 'create',  label: 'Create purchase debit notes' },
+  { code: 'purchase.debit_note.submit',   module: 'purchase', documentType: 'debit_note',   action: 'submit',  label: 'Submit purchase debit notes' },
+  { code: 'purchase.debit_note.approve',  module: 'purchase', documentType: 'debit_note',   action: 'approve', label: 'Approve purchase debit notes' },
   { code: 'purchase.debitnote.create',    module: 'purchase', documentType: 'debitnote',    action: 'create',  label: 'Create debit notes' },
+  { code: 'purchase.blanket_po.view',     module: 'purchase', documentType: 'blanket_po',   action: 'view',    label: 'View blanket purchase orders' },
+  { code: 'purchase.blanket_po.create',   module: 'purchase', documentType: 'blanket_po',   action: 'create',  label: 'Create blanket purchase orders' },
+  { code: 'purchase.blanket_po.approve',  module: 'purchase', documentType: 'blanket_po',   action: 'approve', label: 'Approve blanket purchase orders' },
+  { code: 'purchase.blanket_po.cancel',   module: 'purchase', documentType: 'blanket_po',   action: 'cancel',  label: 'Cancel blanket purchase orders' },
+  { code: 'purchase.lcv.view',            module: 'purchase', documentType: 'lcv',          action: 'view',    label: 'View landed cost vouchers' },
+  { code: 'purchase.lcv.create',          module: 'purchase', documentType: 'lcv',          action: 'create',  label: 'Create landed cost vouchers' },
+  { code: 'purchase.lcv.post',            module: 'purchase', documentType: 'lcv',          action: 'post',    label: 'Post landed cost vouchers' },
+  { code: 'purchase.lcv.cancel',          module: 'purchase', documentType: 'lcv',          action: 'cancel',  label: 'Cancel landed cost vouchers' },
   { code: 'purchase.reports.view',        module: 'purchase', documentType: null,           action: 'view',    label: 'View purchase reports' },
 
   // ── Inventory (Phase 5) ────────────────────────────────────────────────────
@@ -131,6 +142,18 @@ const PERMISSIONS = [
   { code: 'sales.receipt.view',           module: 'sales', documentType: 'receipt',      action: 'view',    label: 'View customer receipts' },
   { code: 'sales.receipt.create',         module: 'sales', documentType: 'receipt',      action: 'create',  label: 'Create customer receipts' },
   { code: 'sales.receipt.approve',        module: 'sales', documentType: 'receipt',      action: 'approve', label: 'Approve customer receipts' },
+  { code: 'sales.return.view',            module: 'sales', documentType: 'return',        action: 'view',    label: 'View sales returns' },
+  { code: 'sales.return.create',          module: 'sales', documentType: 'return',        action: 'create',  label: 'Create sales returns' },
+  { code: 'sales.return.submit',          module: 'sales', documentType: 'return',        action: 'submit',  label: 'Submit sales returns' },
+  { code: 'sales.return.approve',         module: 'sales', documentType: 'return',        action: 'approve', label: 'Approve sales returns' },
+  { code: 'sales.credit_note.view',       module: 'sales', documentType: 'credit_note',   action: 'view',    label: 'View sales credit notes' },
+  { code: 'sales.credit_note.create',     module: 'sales', documentType: 'credit_note',   action: 'create',  label: 'Create sales credit notes' },
+  { code: 'sales.credit_note.submit',     module: 'sales', documentType: 'credit_note',   action: 'submit',  label: 'Submit sales credit notes' },
+  { code: 'sales.credit_note.approve',    module: 'sales', documentType: 'credit_note',   action: 'approve', label: 'Approve sales credit notes' },
+  { code: 'sales.pricelist.view',         module: 'sales', documentType: 'pricelist',    action: 'view',    label: 'View price lists' },
+  { code: 'sales.pricelist.create',       module: 'sales', documentType: 'pricelist',    action: 'create',  label: 'Create price lists' },
+  { code: 'sales.pricelist.edit',         module: 'sales', documentType: 'pricelist',    action: 'edit',    label: 'Edit price lists' },
+  { code: 'sales.so.allow_below_min_price', module: 'sales', documentType: 'so',         action: 'override', label: 'Sell below the minimum price floor' },
   { code: 'sales.reports.view',           module: 'sales', documentType: null,            action: 'view',    label: 'View sales reports' },
 
   // ── Manufacturing (Phase 8) ────────────────────────────────────────────────
@@ -248,7 +271,8 @@ const SYSTEM_ROLES: {
     name: 'Sales User',
     description: 'Create and submit sales documents, no approval',
     permissionCodes: PERMISSIONS
-      .filter((p) => p.module === 'sales' && p.action !== 'approve')
+      // No approval rights, and no authority to sell below the minimum price floor.
+      .filter((p) => p.module === 'sales' && p.action !== 'approve' && p.code !== 'sales.so.allow_below_min_price')
       .map((p) => p.code),
   },
   {

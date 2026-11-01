@@ -1,10 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Table, Card, Typography, Space, Button, Input, Tag, Alert, Row, Col, Statistic } from 'antd';
-import { SearchOutlined, DownloadOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import { Table, Tag } from 'antd';
+import { Scale, Download, Search, CheckCircle2, AlertTriangle, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { api } from '../../api/client';
 import { AmountDisplay } from '../../components/shared/AmountDisplay';
-
-const { Title, Text } = Typography;
 
 interface CoaAccount {
   id: string;
@@ -146,25 +144,40 @@ export function TrialBalanceReportPage() {
       title: 'Account Code',
       dataIndex: 'code',
       key: 'code',
-      render: (code: string) => <Tag color="blue">{code}</Tag>,
+      width: 140,
+      render: (code: string) => (
+        <span className="px-2.5 py-1 rounded-md text-xs font-mono font-bold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+          {code}
+        </span>
+      ),
     },
     {
       title: 'Account Name',
       dataIndex: 'name',
       key: 'name',
-      render: (name: string) => <Text strong>{name}</Text>,
+      render: (name: string) => (
+        <span className="font-semibold text-slate-900 dark:text-white">
+          {name}
+        </span>
+      ),
     },
     {
       title: 'Category',
       dataIndex: 'accountType',
       key: 'accountType',
-      render: (type: string) => <Tag style={{ textTransform: 'capitalize' }}>{type}</Tag>,
+      width: 130,
+      render: (type: string) => (
+        <span className="capitalize px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+          {type}
+        </span>
+      ),
     },
     {
       title: 'Total Debit (₹)',
       dataIndex: 'totalDebitPaise',
       key: 'totalDebitPaise',
       align: 'right' as const,
+      width: 140,
       render: (val: number) => <AmountDisplay paise={val} variant="debit" />,
     },
     {
@@ -172,6 +185,7 @@ export function TrialBalanceReportPage() {
       dataIndex: 'totalCreditPaise',
       key: 'totalCreditPaise',
       align: 'right' as const,
+      width: 140,
       render: (val: number) => <AmountDisplay paise={val} variant="credit" />,
     },
     {
@@ -179,125 +193,154 @@ export function TrialBalanceReportPage() {
       dataIndex: 'netDebitPaise',
       key: 'netDebitPaise',
       align: 'right' as const,
-      render: (val: number) => (val > 0 ? <AmountDisplay paise={val} variant="debit" bold /> : '—'),
+      width: 150,
+      render: (val: number) => (val > 0 ? <AmountDisplay paise={val} variant="debit" bold /> : <span className="text-slate-300 dark:text-slate-600">—</span>),
     },
     {
       title: 'Net Credit (₹)',
       dataIndex: 'netCreditPaise',
       key: 'netCreditPaise',
       align: 'right' as const,
-      render: (val: number) => (val > 0 ? <AmountDisplay paise={val} variant="credit" bold /> : '—'),
+      width: 150,
+      render: (val: number) => (val > 0 ? <AmountDisplay paise={val} variant="credit" bold /> : <span className="text-slate-300 dark:text-slate-600">—</span>),
     },
   ];
 
   return (
-    <div style={{ padding: 24 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24, alignItems: 'center' }}>
-        <div>
-          <Title level={3} style={{ margin: 0 }}>
-            Trial Balance
-          </Title>
-          <Text type="secondary">Summary of all ledger debits and credits for double-entry verification</Text>
+    <div className="h-full flex flex-col bg-slate-50 dark:bg-slate-950 min-h-screen text-slate-900 dark:text-slate-100 transition-colors">
+      {/* Top Header Bar */}
+      <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0 transition-colors">
+        <div className="flex items-center space-x-3.5">
+          <div className="p-2.5 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/40 rounded-xl shadow-xs">
+            <Scale className="w-6 h-6" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mb-0.5">
+              <span>Accounting</span>
+              <span>/</span>
+              <span className="text-indigo-600 dark:text-indigo-400 font-medium">Trial Balance</span>
+            </div>
+            <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
+              Trial Balance Report
+            </h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Summary of all ledger debits and credits for double-entry verification
+            </p>
+          </div>
         </div>
-        <Button icon={<DownloadOutlined />} onClick={handleExportCsv}>
-          Export CSV
-        </Button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleExportCsv}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 rounded-xl shadow-xs text-sm font-medium transition-all"
+          >
+            <Download className="w-4 h-4" />
+            Export CSV
+          </button>
+        </div>
       </div>
 
-      <Row gutter={16} style={{ marginBottom: 24 }}>
-        <Col span={8}>
-          <Card>
-            <Statistic
-              title="Total Debits"
-              value={grandTotalDebitPaise / 100}
-              precision={2}
-              prefix="₹"
-              valueStyle={{ color: '#15803D' }}
-            />
-          </Card>
-        </Col>
-        <Col span={8}>
-          <Card>
-            <Statistic
-              title="Total Credits"
-              value={grandTotalCreditPaise / 100}
-              precision={2}
-              prefix="₹"
-              valueStyle={{ color: '#B91C1C' }}
-            />
-          </Card>
-        </Col>
-        <Col span={8}>
-          <Card>
-            <Statistic
-              title="Trial Balance State"
-              value={isTrialBalanceInSync ? 'In Balance' : 'Out of Balance'}
-              valueStyle={{ color: isTrialBalanceInSync ? '#15803D' : '#B91C1C' }}
-              prefix={isTrialBalanceInSync ? <CheckCircleOutlined /> : undefined}
-            />
-          </Card>
-        </Col>
-      </Row>
+      {/* Main Content Area */}
+      <div className="flex-1 p-6 space-y-6 overflow-auto">
+        {/* KPI Stats Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Total Debits</span>
+              <div className="p-2 bg-emerald-50 dark:bg-emerald-950/50 rounded-lg text-emerald-600 dark:text-emerald-400">
+                <ArrowUpRight className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-2">
+              <AmountDisplay paise={grandTotalDebitPaise} variant="debit" />
+            </div>
+            <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">Cumulative debits across all accounts</div>
+          </div>
 
-      <Card style={{ marginBottom: 16 }}>
-        <Input
-          placeholder="Filter by account code or name..."
-          prefix={<SearchOutlined />}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{ width: 320 }}
-        />
-      </Card>
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Total Credits</span>
+              <div className="p-2 bg-red-50 dark:bg-red-950/50 rounded-lg text-red-600 dark:text-red-400">
+                <ArrowDownRight className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="text-2xl font-bold text-red-600 dark:text-red-400 mt-2">
+              <AmountDisplay paise={grandTotalCreditPaise} variant="credit" />
+            </div>
+            <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">Cumulative credits across all accounts</div>
+          </div>
 
-      <Card>
-        <Table
-          rowKey="key"
-          loading={loading}
-          dataSource={filteredRows}
-          columns={columns}
-          pagination={false}
-          summary={() => (
-            <Table.Summary fixed>
-              <Table.Summary.Row style={{ background: '#fafafa', fontWeight: 'bold' }}>
-                <Table.Summary.Cell index={0} colSpan={3}>
-                  <Text strong>Grand Total</Text>
-                </Table.Summary.Cell>
-                <Table.Summary.Cell index={1} align="right">
-                  <AmountDisplay paise={grandTotalDebitPaise} variant="debit" bold />
-                </Table.Summary.Cell>
-                <Table.Summary.Cell index={2} align="right">
-                  <AmountDisplay paise={grandTotalCreditPaise} variant="credit" bold />
-                </Table.Summary.Cell>
-                <Table.Summary.Cell index={3} align="right">
-                  <AmountDisplay
-                    paise={rows.reduce((sum, r) => sum + r.netDebitPaise, 0)}
-                    variant="debit"
-                    bold
-                  />
-                </Table.Summary.Cell>
-                <Table.Summary.Cell index={4} align="right">
-                  <AmountDisplay
-                    paise={rows.reduce((sum, r) => sum + r.netCreditPaise, 0)}
-                    variant="credit"
-                    bold
-                  />
-                </Table.Summary.Cell>
-              </Table.Summary.Row>
-            </Table.Summary>
-          )}
-        />
-      </Card>
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Trial Balance Status</span>
+              <div className={`p-2 rounded-lg ${isTrialBalanceInSync ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400' : 'bg-red-50 dark:bg-red-950/50 text-red-600 dark:text-red-400'}`}>
+                {isTrialBalanceInSync ? <CheckCircle2 className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+              </div>
+            </div>
+            <div className={`text-2xl font-bold mt-2 ${isTrialBalanceInSync ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+              {isTrialBalanceInSync ? 'In Balance' : 'Out of Balance'}
+            </div>
+            <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">
+              {isTrialBalanceInSync ? 'Debits and Credits are perfectly equal' : 'Difference detected in postings'}
+            </div>
+          </div>
+        </div>
 
-      {!isTrialBalanceInSync && (
-        <Alert
-          type="error"
-          message="Trial Balance Discrepancy"
-          description="Total Debits do not match Total Credits. Please review recent manual Journal Vouchers."
-          showIcon
-          style={{ marginTop: 16 }}
-        />
-      )}
+        {/* Search & Filter Bar */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-xs flex flex-col sm:flex-row items-center gap-3 transition-colors">
+          <div className="relative flex-1 w-full">
+            <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400 dark:text-slate-500" />
+            <input
+              type="text"
+              placeholder="Filter by account code, name, or category..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full pl-9 pr-4 py-2 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-white placeholder-slate-400 transition-colors"
+            />
+          </div>
+        </div>
+
+        {/* Table Container */}
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden transition-colors">
+          <Table
+            rowKey="key"
+            loading={loading}
+            dataSource={filteredRows}
+            columns={columns}
+            pagination={{ pageSize: 25 }}
+            summary={() => (
+              <Table.Summary fixed>
+                <Table.Summary.Row className="bg-slate-50 dark:bg-slate-800 font-bold">
+                  <Table.Summary.Cell index={0} colSpan={3}>
+                    <span className="text-slate-900 dark:text-white">Grand Total</span>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={3} align="right">
+                    <AmountDisplay paise={grandTotalDebitPaise} variant="debit" bold />
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={4} align="right">
+                    <AmountDisplay paise={grandTotalCreditPaise} variant="credit" bold />
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={5} align="right">
+                    <AmountDisplay
+                      paise={rows.reduce((s, r) => s + r.netDebitPaise, 0)}
+                      variant="debit"
+                      bold
+                    />
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={6} align="right">
+                    <AmountDisplay
+                      paise={rows.reduce((s, r) => s + r.netCreditPaise, 0)}
+                      variant="credit"
+                      bold
+                    />
+                  </Table.Summary.Cell>
+                </Table.Summary.Row>
+              </Table.Summary>
+            )}
+          />
+        </div>
+      </div>
     </div>
   );
 }
+
 export default TrialBalanceReportPage;

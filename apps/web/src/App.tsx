@@ -20,6 +20,7 @@ import { PlantsWarehousesPage } from './pages/settings/PlantsWarehouses';
 import { NumberSeriesPage } from './pages/settings/NumberSeries';
 import { TaxCodesPage } from './pages/settings/TaxCodes';
 import { CustomFieldsPage } from './pages/settings/CustomFields';
+import { UserGuidePage } from './pages/settings/UserGuide';
 import { SuppliersPage, CustomersPage } from './pages/masters/Parties';
 import { SupplierDetailPage, CustomerDetailPage } from './pages/masters/PartyDetail';
 import { ItemsPage } from './pages/masters/Items';
@@ -79,6 +80,7 @@ export function App() {
                     <Route path="coa" element={<ChartOfAccountsPage />} />
                     <Route path="tax-codes" element={<TaxCodesPage />} />
                     <Route path="custom-fields" element={<CustomFieldsPage />} />
+                    <Route path="user-guide" element={<UserGuidePage />} />
                   </Route>
 
                   {/* ── Phase 2: Masters ────────────────────────────────── */}

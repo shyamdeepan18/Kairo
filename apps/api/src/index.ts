@@ -22,6 +22,8 @@ import manufacturingRoutes from './routes/manufacturing.js';
 import governanceRoutes from './routes/governance.js';
 import reportsRoutes from './routes/reports.js';
 import adminRoutes from './routes/admin.js';
+import accountingRoutes from './routes/accounting.js';
+import notificationsRoutes from './routes/notifications.js';
 import { PermissionService } from './services/permissions.js';
 
 const app = Fastify({
@@ -104,15 +106,21 @@ async function start() {
   await app.register(governanceRoutes, { prefix: '/api/governance' });
   // Phase 10: Reports module
   await app.register(reportsRoutes, { prefix: '/api/reports' });
+  // Accounting module: Journal Vouchers, GL adjustments
+  await app.register(accountingRoutes, { prefix: '/api/accounting' });
+  // Notifications: in-app alerts, pending approvals, low stock
+  await app.register(notificationsRoutes, { prefix: '/api/notifications' });
   // System Admin portal — platform-owner only (isSystemAdmin = true)
   await app.register(adminRoutes, { prefix: '/api/admin' });
 
   // Health check — used by Docker healthcheck and load balancers
-  app.get('/health', async () => ({
+  const healthHandler = async () => ({
     status: 'ok',
     ts: new Date().toISOString(),
     env: process.env.NODE_ENV,
-  }));
+  });
+  app.get('/health', healthHandler);
+  app.get('/api/health', healthHandler);
 
   await app.listen({ port: config.port, host: config.host });
   app.log.info(`API listening on ${config.host}:${config.port}`);

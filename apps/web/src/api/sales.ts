@@ -21,10 +21,16 @@ export interface SalesHeader {
   postingDate: string;
   customerId?: string;
   netAmountPaise: number;
+  discountPaise?: number;
   taxAmountPaise: number;
+  roundOffPaise?: number;
   totalAmountPaise: number;
   remarks: string | null;
   createdAt: string;
+  createdBy?: string;
+  submittedBy?: string;
+  createdByName?: string;
+  submittedByName?: string;
   // SO-specific
   deliveredQty?: number;
   deliveryStatus?: string;
@@ -34,6 +40,14 @@ export interface SalesHeader {
   receivedAmountPaise?: number;
   paidAmountPaise?: number;
   paymentStatus?: string;
+  approvalInfo?: {
+    requestId: string;
+    status: string;
+    currentLevel: number;
+    isEligibleApprover: boolean;
+    hasApproved: boolean;
+    currentApproverName: string;
+  } | null;
 }
 
 export interface SalesLineInput {
@@ -94,6 +108,7 @@ export const salesApi = {
     list: (companyId: string, params?: Record<string, unknown>) => listDocs('quotations', companyId, params),
     get: (companyId: string, id: string) => getDoc('quotations', companyId, id),
     create: (body: Record<string, unknown>) => createDoc('quotations', body),
+    update: (id: string, body: Record<string, unknown>) => api.put(`${BASE}/quotations/${id}`, body).then((r) => r.data),
     act: (id: string, action: SalesAction, companyId: string, remarks?: string) => act('quotations', id, action, companyId, remarks),
   },
 
@@ -101,6 +116,8 @@ export const salesApi = {
     list: (companyId: string, params?: Record<string, unknown>) => listDocs('orders', companyId, params),
     get: (companyId: string, id: string) => getDoc('orders', companyId, id),
     create: (body: Record<string, unknown>) => createDoc('orders', body),
+    update: (id: string, body: Record<string, unknown>) => api.put(`${BASE}/orders/${id}`, body).then((r) => r.data),
+    shortClose: (id: string, remarks?: string) => api.post(`${BASE}/orders/${id}/short-close`, { remarks }).then((r) => r.data),
     act: (id: string, action: SalesAction, companyId: string, remarks?: string) => act('orders', id, action, companyId, remarks),
   },
 
@@ -109,6 +126,8 @@ export const salesApi = {
     get: (companyId: string, id: string) => getDoc('deliveries', companyId, id),
     create: (body: Record<string, unknown>) => createDoc('deliveries', body),
     act: (id: string, action: SalesAction, companyId: string, remarks?: string) => act('deliveries', id, action, companyId, remarks),
+    getFefoRecommendations: (params: { itemId: string; warehouseId: string; requiredQty: number; customerId?: string }) =>
+      api.get('/sales/fefo-recommendations', { params }).then((r) => r.data),
   },
 
   invoices: {
@@ -116,6 +135,8 @@ export const salesApi = {
     get: (companyId: string, id: string) => getDoc('invoices', companyId, id),
     create: (body: Record<string, unknown>) => createDoc('invoices', body),
     act: (id: string, action: SalesAction, companyId: string, remarks?: string) => act('invoices', id, action, companyId, remarks),
+    quickInvoice: (body: Record<string, unknown>) =>
+      api.post('/sales/quick-invoice', body).then((r) => r.data),
   },
 
   receipts: {
@@ -123,5 +144,19 @@ export const salesApi = {
     get: (companyId: string, id: string) => getDoc('receipts', companyId, id),
     create: (body: Record<string, unknown>) => createDoc('receipts', body),
     act: (id: string, action: SalesAction, companyId: string, remarks?: string) => act('receipts', id, action, companyId, remarks),
+  },
+
+  returns: {
+    list: (companyId: string, params?: Record<string, unknown>) => listDocs('returns', companyId, params),
+    get: (companyId: string, id: string) => getDoc('returns', companyId, id),
+    create: (body: Record<string, unknown>) => createDoc('returns', body),
+    act: (id: string, action: SalesAction, companyId: string, remarks?: string) => act('returns', id, action, companyId, remarks),
+  },
+
+  creditNotes: {
+    list: (companyId: string, params?: Record<string, unknown>) => listDocs('credit-notes', companyId, params),
+    get: (companyId: string, id: string) => getDoc('credit-notes', companyId, id),
+    create: (body: Record<string, unknown>) => createDoc('credit-notes', body),
+    act: (id: string, action: SalesAction, companyId: string, remarks?: string) => act('credit-notes', id, action, companyId, remarks),
   },
 };

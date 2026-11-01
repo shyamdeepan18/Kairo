@@ -22,11 +22,13 @@ import dayjs from 'dayjs';
 import { ChangePasswordModal } from '../../components/ChangePasswordModal';
 import { DiagnosticsPanel } from './DiagnosticsPanel';
 import { InteractiveRoles } from './components/InteractiveRoles';
+import { AdminStockAdjustments } from './components/AdminStockAdjustments';
+import { IndustryBlueprints } from './components/IndustryBlueprints';
 
 const { Sider, Content, Header } = Layout;
 const { Title, Text } = Typography;
 
-type Section = 'companies' | 'plants' | 'users' | 'roles' | 'license' | 'diagnostics';
+type Section = 'companies' | 'plants' | 'users' | 'roles' | 'license' | 'diagnostics' | 'stock-adjustments' | 'blueprints';
 
 export function AdminPortalPage() {
   const { confirmClose } = useUnsavedChanges();
@@ -609,7 +611,9 @@ export function AdminPortalPage() {
             style={{ background: 'transparent', border: 'none' }} 
             items={[
               { key: 'companies', icon: <BankOutlined />, label: 'Companies', onClick: () => { setSection('companies'); setSelectedCompany(null); } },
+              { key: 'blueprints', icon: <ApartmentOutlined />, label: 'Industry Bundles', onClick: () => setSection('blueprints') },
               { key: 'diagnostics', icon: <DashboardOutlined />, label: 'Diagnostics', onClick: () => { setSection('diagnostics'); setSelectedCompany(null); } },
+              { key: 'stock-adjustments', icon: <WarningOutlined />, label: 'Stock Reconciliation', onClick: () => setSection('stock-adjustments') },
               ...(selectedCompany ? [
                 { key: 'plants', icon: <ApartmentOutlined />, label: 'Plants', onClick: () => selectCompany(selectedCompany, 'plants') },
                 { key: 'users', icon: <TeamOutlined />, label: 'Users', onClick: () => selectCompany(selectedCompany, 'users') },
@@ -643,6 +647,22 @@ export function AdminPortalPage() {
 
           {/* ── Diagnostics ───────────────────────────────────────────────── */}
           {section === 'diagnostics' && <DiagnosticsPanel />}
+
+          {/* ── Industry Blueprints & Bundles ─────────────────────────────── */}
+          {section === 'blueprints' && (
+            <IndustryBlueprints
+              companies={companies}
+              selectedCompany={selectedCompany}
+            />
+          )}
+
+          {/* ── Stock Adjustments Override ─────────────────────────────────── */}
+          {section === 'stock-adjustments' && (
+            <AdminStockAdjustments
+              companies={companies}
+              selectedCompany={selectedCompany}
+            />
+          )}
 
           {/* ── Companies ─────────────────────────────────────────────────── */}
           {section === 'companies' && (

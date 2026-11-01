@@ -41,6 +41,14 @@ const TRANSITIONS: Record<string, Partial<Record<DocumentStatus, DocumentStatus[
     closed:    [],
     cancelled: [],
   },
+  'purchase.blanket_po': {
+    draft:     ['submitted'],
+    submitted: ['approved', 'rejected'],
+    rejected:  ['draft'],
+    approved:  ['closed', 'cancelled'],
+    closed:    [],
+    cancelled: [],
+  },
   'purchase.po': {
     draft:     ['submitted'],
     submitted: ['approved', 'rejected'],
@@ -56,6 +64,13 @@ const TRANSITIONS: Record<string, Partial<Record<DocumentStatus, DocumentStatus[
     approved:  [],          // GRN is terminal once approved — it posts stock
     cancelled: [],
   },
+  'purchase.lcv': {
+    draft:     ['submitted'],
+    submitted: ['approved', 'rejected'],
+    rejected:  ['draft'],
+    approved:  ['cancelled'],
+    cancelled: [],
+  },
   'purchase.invoice': {
     draft:     ['submitted'],
     submitted: ['approved', 'rejected'],
@@ -68,6 +83,21 @@ const TRANSITIONS: Record<string, Partial<Record<DocumentStatus, DocumentStatus[
     submitted: ['approved', 'rejected'],
     rejected:  ['draft'],
     approved:  [],
+    cancelled: [],
+  },
+  'purchase.debit_note': {
+    draft:     ['submitted'],
+    submitted: ['approved', 'rejected'],
+    rejected:  ['draft'],
+    approved:  ['cancelled'],
+    cancelled: [],
+  },
+
+  'purchase.return': {
+    draft:     ['submitted'],
+    submitted: ['approved', 'rejected'],
+    rejected:  ['draft'],
+    approved:  ['cancelled'],
     cancelled: [],
   },
   'sales.quotation': {
@@ -121,9 +151,11 @@ const TRANSITIONS: Record<string, Partial<Record<DocumentStatus, DocumentStatus[
     cancelled: [],
   },
   'inventory.transfer': {
-    draft:       ['submitted'],
-    submitted:   ['approved', 'dispatched', 'rejected'],
-    dispatched:  ['completed', 'rejected'],
+    draft:       ['submitted', 'cancelled'],
+    submitted:   ['approved', 'dispatched', 'rejected', 'cancelled'],
+    // Dispatched stock has been issued from source; it cannot be rejected —
+    // it is either received (→ completed) or reversed back to source (→ cancelled).
+    dispatched:  ['completed', 'cancelled'],
     rejected:    ['draft'],
     approved:    [],
     completed:   [],

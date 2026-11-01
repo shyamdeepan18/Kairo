@@ -41,6 +41,8 @@ const docLineSchema = z.object({
   description: z.string().optional(),
   quantity: qty,
   uom: z.string().min(1).max(20),
+  secondaryQty: qty.optional(),
+  secondaryUom: z.string().min(1).max(20).optional(),
   ratePaise: paisePos,
   discountPercent: z.number().min(0).max(100).default(0),
   discountPaise: paisePos.default(0),
@@ -55,7 +57,12 @@ const docLineSchema = z.object({
 const docHeaderBase = z.object({
   plantId: uuid,
   postingDate: isoDate,
+  projectId: uuid.optional(),
   remarks: z.string().optional(),
+  discountPaise: paisePos.default(0).optional(),
+  roundOffPaise: z.number().int().default(0).optional(),
+  customData: z.record(z.unknown()).optional(),
+  custom_data: z.record(z.unknown()).optional(),
 }).strict();
 
 // ─── Purchase Requisition ─────────────────────────────────────────────────
@@ -84,13 +91,17 @@ export const prCreateSchema = docHeaderBase.extend({
 export const poCreateSchema = docHeaderBase.extend({
   supplierId: uuid,
   requisitionId: uuid.optional(),
+  blanketPoId: uuid.optional(),
   supplierRef: z.string().max(100).optional(),
   expectedDeliveryDate: isoDate.optional(),
   paymentTermsDays: z.number().int().nonnegative().default(0),
   deliveryWarehouseId: uuid.optional(),
   placeOfSupply: z.string().length(2).optional(),
   isReverseCharge: z.boolean().default(false),
-  lines: z.array(docLineSchema.extend({ requisitionLineId: uuid.optional() })).min(1),
+  lines: z.array(docLineSchema.extend({
+    requisitionLineId: uuid.optional(),
+    blanketPoLineId: uuid.optional(),
+  })).min(1),
 });
 
 // ─── Goods Receipt Note ──────────────────────────────────────────────────────
@@ -155,6 +166,83 @@ export const purchasePaymentCreateSchema = docHeaderBase.extend({
     .default([]),
 });
 
+// ─── Purchase Return (Return to Vendor) ───────────────────────────────────
+
+export const purchaseReturnCreateSchema = docHeaderBase.extend({
+  supplierId: uuid,
+  grnId: uuid.optional(),
+  warehouseId: uuid,
+  reason: z.string().optional(),
+  lines: z
+    .array(
+      docLineSchema.extend({
+        grnLineId: uuid.optional(),
+        batchId: uuid.optional(),
+        warehouseId: uuid.optional(),
+      })
+    )
+    .min(1),
+});
+
+// ─── Purchase Debit Note ───────────────────────────────────────────────────
+
+export const purchaseDebitNoteCreateSchema = docHeaderBase.extend({
+  supplierId: uuid,
+  invoiceId: uuid.optional(),
+  returnId: uuid.optional(),
+  supplierDebitNoteNumber: z.string().max(50).optional(),
+  supplierDebitNoteDate: isoDate.optional(),
+  reason: z.string().optional(),
+  lines: z
+    .array(
+      docLineSchema.extend({
+        invoiceLineId: uuid.optional(),
+        returnLineId: uuid.optional(),
+      })
+    )
+    .min(1),
+});
+
+// ─── Blanket Purchase Order (GAP 7) ──────────────────────────────────────────
+
+export const blanketPoCreateSchema = docHeaderBase.extend({
+  supplierId: uuid,
+  validFrom: isoDate,
+  validTo: isoDate,
+  termsAndConditions: z.string().optional(),
+  lines: z
+    .array(
+      z.object({
+        itemId: uuid,
+        description: z.string().optional(),
+        committedQty: qty,
+        uom: z.string().min(1).max(20),
+        ratePaise: paisePos,
+        discountPercent: z.number().min(0).max(100).default(0),
+        discountPaise: paisePos.default(0),
+        taxCodeId: uuid.optional(),
+        hsnSacCode: z.string().max(20).optional(),
+      })
+    )
+    .min(1),
+});
+
+// ─── Landed Cost Voucher (GAP 3) ───────────────────────────────────────────
+
+export const lcvCreateSchema = docHeaderBase.extend({
+  allocationBasis: z.enum(['by_value', 'by_qty']).default('by_value'),
+  applicableGrnIds: z.array(uuid).min(1),
+  expenseLines: z
+    .array(
+      z.object({
+        expenseAccountId: uuid,
+        description: z.string().min(1).max(255),
+        amountPaise: paisePos,
+      })
+    )
+    .min(1),
+});
+
 // ─── Status transition (submit / approve / reject / cancel) ─────────────────
 
 export const transitionSchema = z.object({
@@ -166,7 +254,11 @@ export const transitionSchema = z.object({
 export type SupplierCreateInput = z.infer<typeof supplierCreateSchema>;
 export type SupplierUpdateInput = z.infer<typeof supplierUpdateSchema>;
 export type PrCreateInput = z.infer<typeof prCreateSchema>;
+export type BlanketPoCreateInput = z.infer<typeof blanketPoCreateSchema>;
 export type PoCreateInput = z.infer<typeof poCreateSchema>;
 export type GrnCreateInput = z.infer<typeof grnCreateSchema>;
 export type PurchaseInvoiceCreateInput = z.infer<typeof purchaseInvoiceCreateSchema>;
 export type PurchasePaymentCreateInput = z.infer<typeof purchasePaymentCreateSchema>;
+export type PurchaseReturnCreateInput = z.infer<typeof purchaseReturnCreateSchema>;
+export type PurchaseDebitNoteCreateInput = z.infer<typeof purchaseDebitNoteCreateSchema>;
+export type LcvCreateInput = z.infer<typeof lcvCreateSchema>;

@@ -90,6 +90,24 @@ export interface AdminAuditLog {
   userEmail: string | null;
 }
 
+export interface IndustryBlueprint {
+  id: string;
+  category: string;
+  name: string;
+  description: string;
+  modules: string[];
+  features: string[];
+  icon: string;
+}
+
+export interface CompanyModuleRecord {
+  id: string;
+  companyId: string;
+  module: string;
+  isEnabled: boolean;
+  updatedAt: string;
+}
+
 export const adminApi = {
   // Companies
   listCompanies: () =>
@@ -156,4 +174,29 @@ export const adminApi = {
     api.get<AdminDiagnosticsHealth>('/admin/diagnostics/health').then((r) => r.data),
   listAuditLogs: (params: { limit: number; offset: number }) =>
     api.get<{ logs: AdminAuditLog[]; total: number }>('/admin/diagnostics/audit-logs', { params }).then((r) => r.data),
+
+  // Stock Adjustment Override (Admin-Only Super Console)
+  overrideStockAdjustment: (data: {
+    companyId: string;
+    plantId: string;
+    warehouseId: string;
+    itemId: string;
+    movementType: 'adjustment_in' | 'adjustment_out' | 'opening_balance';
+    quantity: number;
+    valuationRatePaise?: number;
+    postingDate: string;
+    reasonCode: string;
+    justification: string;
+    referenceDocNumber?: string;
+  }) => api.post('/admin/stock-adjustments/override', data).then((r) => r.data),
+
+  // Industry Blueprints & Feature Bundles
+  listBlueprints: () =>
+    api.get<{ blueprints: IndustryBlueprint[] }>('/admin/blueprints').then((r) => r.data.blueprints),
+  getCompanyModules: (companyId: string) =>
+    api.get<{ modules: CompanyModuleRecord[] }>(`/admin/companies/${companyId}/modules`).then((r) => r.data.modules),
+  applyBlueprint: (companyId: string, blueprintId: string) =>
+    api.post<{ success: boolean; blueprint: IndustryBlueprint }>(`/admin/companies/${companyId}/apply-blueprint`, { blueprintId }).then((r) => r.data),
+  toggleCompanyModule: (companyId: string, module: string, isEnabled: boolean) =>
+    api.patch<{ success: boolean; module: string; isEnabled: boolean }>(`/admin/companies/${companyId}/modules/${module}`, { isEnabled }).then((r) => r.data),
 };

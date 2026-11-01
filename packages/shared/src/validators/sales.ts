@@ -23,6 +23,7 @@ const customerFields = z.object({
   phone: z.string().max(20).optional(),
   email: z.string().email().optional(),
   paymentTermsDays: z.number().int().nonnegative().default(0),
+  minShelfLifeDays: z.number().int().nonnegative().default(0),
   creditLimitPaise: paisePos.default(0),
   defaultDiscountPercent: z.number().min(0).max(100).default(0),
   tcsApplicable: z.boolean().default(false),
@@ -53,6 +54,8 @@ const docLineSchema = z.object({
   description: z.string().optional(),
   quantity: qty,
   uom: z.string().min(1).max(20),
+  secondaryQty: qty.optional(),
+  secondaryUom: z.string().min(1).max(20).optional(),
   ratePaise: paisePos,
   discountPercent: z.number().min(0).max(100).default(0),
   discountPaise: paisePos.default(0),
@@ -65,7 +68,12 @@ const docLineSchema = z.object({
 const docHeaderBase = z.object({
   plantId: uuid,
   postingDate: isoDate,
+  projectId: uuid.optional(),
   remarks: z.string().optional(),
+  discountPaise: paisePos.default(0).optional(),
+  roundOffPaise: z.number().int().default(0).optional(),
+  customData: z.record(z.unknown()).optional(),
+  custom_data: z.record(z.unknown()).optional(),
 }).strict();
 
 const addressRefs = {
@@ -77,11 +85,19 @@ const addressRefs = {
 
 // ─── Quotation ────────────────────────────────────────────────────────────
 
+// Quotation/SO lines may OMIT rate/discount — the PricingService resolves them
+// server-side from the customer's price list + default discount ("both" authority:
+// an explicit value is treated as a manual override, still floor-guarded).
+const pricedLineSchema = docLineSchema.extend({
+  ratePaise: paisePos.optional(),
+  discountPercent: z.number().min(0).max(100).optional(),
+});
+
 export const quotationCreateSchema = docHeaderBase.extend({
   customerId: uuid,
   ...addressRefs,
   validUntilDate: isoDate.optional(),
-  lines: z.array(docLineSchema).min(1),
+  lines: z.array(pricedLineSchema).min(1),
 });
 
 // ─── Sales Order ──────────────────────────────────────────────────────────
@@ -94,7 +110,7 @@ export const soCreateSchema = docHeaderBase.extend({
   customerPoDate: isoDate.optional(),
   expectedDeliveryDate: isoDate.optional(),
   paymentTermsDays: z.number().int().nonnegative().default(0),
-  lines: z.array(docLineSchema.extend({ quotationLineId: uuid.optional() })).min(1),
+  lines: z.array(pricedLineSchema.extend({ quotationLineId: uuid.optional() })).min(1),
 });
 
 // ─── Delivery Note ──────────────────────────────────────────────────────────
@@ -119,6 +135,8 @@ export const deliveryCreateSchema = docHeaderBase.extend({
         soLineId: uuid.optional(),
         deliveredQty: qty,
         uom: z.string().min(1).max(20),
+        secondaryQty: qty.optional(),
+        secondaryUom: z.string().min(1).max(20).optional(),
         ratePaise: paisePos.default(0),
         taxCodeId: uuid.optional(),
         hsnSacCode: z.string().max(10).optional(),
@@ -163,6 +181,125 @@ export const salesReceiptCreateSchema = docHeaderBase.extend({
     .default([]),
 });
 
+// ─── Sales Return (RMA) ────────────────────────────────────────────────────
+
+export const salesReturnCreateSchema = docHeaderBase.extend({
+  customerId: uuid,
+  deliveryId: uuid.optional(),
+  invoiceId: uuid.optional(),
+  warehouseId: uuid,
+  reason: z.string().optional(),
+  lines: z
+    .array(
+      docLineSchema
+        .omit({ quantity: true })
+        .extend({
+          returnedQty: qty,
+          deliveryLineId: uuid.optional(),
+          invoiceLineId: uuid.optional(),
+          cogsRatePaise: paisePos.default(0),
+          warehouseId: uuid.optional(),
+          batchId: uuid.optional(),
+          batchNumber: z.string().max(100).optional(),
+        })
+    )
+    .min(1),
+});
+
+// ─── Quick Invoice (Direct Single-Screen Sale / POS Mode) ───────────────────
+
+export const quickInvoiceCreateSchema = z.object({
+  plantId: uuid,
+  warehouseId: uuid.optional(),
+  postingDate: isoDate,
+  customerId: uuid.optional(),
+  customerName: z.string().max(255).optional(),
+  customerPhone: z.string().max(20).optional(),
+  customerGstin: z.string().length(15).optional(),
+  paymentMode: z.enum(['cash', 'bank_transfer', 'cheque', 'upi', 'card', 'adjustment']).default('cash'),
+  paidAmountPaise: paisePos.optional(),
+  remarks: z.string().optional(),
+  customData: z.record(z.unknown()).optional(),
+  lines: z
+    .array(
+      z.object({
+        itemId: uuid,
+        description: z.string().optional(),
+        quantity: qty,
+        uom: z.string().min(1).max(20),
+        ratePaise: paisePos,
+        discountPercent: z.number().min(0).max(100).default(0),
+        taxCodeId: uuid.optional(),
+        hsnSacCode: z.string().max(10).optional(),
+        warehouseId: uuid.optional(),
+        customData: z.record(z.unknown()).optional(),
+      })
+    )
+    .min(1),
+}).strict();
+
+// ─── Sales Credit Note ─────────────────────────────────────────────────────
+
+export const salesCreditNoteCreateSchema = docHeaderBase.extend({
+  customerId: uuid,
+  invoiceId: uuid.optional(),
+  returnId: uuid.optional(),
+  reason: z.string().optional(),
+  lines: z
+    .array(
+      docLineSchema.extend({
+        invoiceLineId: uuid.optional(),
+        returnLineId: uuid.optional(),
+      })
+    )
+    .min(1),
+});
+
+// ─── Price lists ──────────────────────────────────────────────────────────
+
+export const priceListCreateSchema = z.object({
+  code: z.string().min(1).max(30),
+  name: z.string().min(1).max(255),
+  currency: z.string().length(3).default('INR'),
+  isDefault: z.boolean().default(false),
+  appliesToTier: z.string().max(50).optional().nullable(),
+  validFrom: isoDate.optional().nullable(),
+  validTo: isoDate.optional().nullable(),
+  isActive: z.boolean().default(true),
+}).strict();
+
+export const priceListUpdateSchema = z.object({
+  code: z.string().min(1).max(30).optional(),
+  name: z.string().min(1).max(255).optional(),
+  currency: z.string().length(3).optional(),
+  isDefault: z.boolean().optional(),
+  appliesToTier: z.string().max(50).optional().nullable(),
+  validFrom: isoDate.optional().nullable(),
+  validTo: isoDate.optional().nullable(),
+  isActive: z.boolean().optional(),
+}).strict();
+
+export const priceListItemCreateSchema = z.object({
+  itemId: uuid,
+  minQty: z.number().positive().default(1),
+  unitPricePaise: paisePos,
+  discountPercent: z.number().min(0).max(100).default(0),
+  uom: z.string().max(20).optional().nullable(),
+  validFrom: isoDate.optional().nullable(),
+  validTo: isoDate.optional().nullable(),
+  isActive: z.boolean().default(true),
+}).strict();
+
+export const priceListItemUpdateSchema = z.object({
+  minQty: z.number().positive().optional(),
+  unitPricePaise: paisePos.optional(),
+  discountPercent: z.number().min(0).max(100).optional(),
+  uom: z.string().max(20).optional().nullable(),
+  validFrom: isoDate.optional().nullable(),
+  validTo: isoDate.optional().nullable(),
+  isActive: z.boolean().optional(),
+}).strict();
+
 // ─── Inferred input types ────────────────────────────────────────────────────
 
 export type CustomerCreateInput = z.infer<typeof customerCreateSchema>;
@@ -172,3 +309,8 @@ export type SoCreateInput = z.infer<typeof soCreateSchema>;
 export type DeliveryCreateInput = z.infer<typeof deliveryCreateSchema>;
 export type SalesInvoiceCreateInput = z.infer<typeof salesInvoiceCreateSchema>;
 export type SalesReceiptCreateInput = z.infer<typeof salesReceiptCreateSchema>;
+export type SalesReturnCreateInput = z.infer<typeof salesReturnCreateSchema>;
+export type QuickInvoiceCreateInput = z.infer<typeof quickInvoiceCreateSchema>;
+export type SalesCreditNoteCreateInput = z.infer<typeof salesCreditNoteCreateSchema>;
+export type PriceListCreateInput = z.infer<typeof priceListCreateSchema>;
+export type PriceListItemCreateInput = z.infer<typeof priceListItemCreateSchema>;

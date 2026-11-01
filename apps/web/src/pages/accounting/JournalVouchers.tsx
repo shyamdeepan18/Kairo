@@ -1,12 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
-import { Table, Button, Card, Tag, Modal, Form, Input, DatePicker, Select, InputNumber, Space, Typography, Alert, message } from 'antd';
-import { PlusOutlined, CheckCircleOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
+import { Table, Tag, Modal, Form, Input, DatePicker, Select, InputNumber, Alert, message } from 'antd';
+import { BookOpen, Plus, Search, CheckCircle2, AlertTriangle, Layers, DollarSign, Trash2 } from 'lucide-react';
 import dayjs from 'dayjs';
 import { api } from '../../api/client';
 import { AmountDisplay } from '../../components/shared/AmountDisplay';
-
-const { Title, Text } = Typography;
 
 interface JournalLineInput {
   accountId: string;
@@ -44,6 +42,7 @@ export function JournalVouchersPage() {
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [coaAccounts, setCoaAccounts] = useState<CoaAccount[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const [form] = Form.useForm();
   const [lines, setLines] = useState<JournalLineInput[]>([
@@ -95,7 +94,7 @@ export function JournalVouchersPage() {
 
   const handleRemoveLine = (index: number) => {
     if (lines.length <= 2) {
-      message.warning('A journal entry must have at least 2 lines');
+      message.warning('A journal entry must have at least 2 lines (debit & credit)');
       return;
     }
     setLines(lines.filter((_, i) => i !== index));
@@ -120,7 +119,7 @@ export function JournalVouchersPage() {
       };
 
       await api.post('/accounting/jv', payload);
-      message.success('Journal Voucher created successfully');
+      message.success('Journal Voucher posted successfully');
       setIsModalOpen(false);
       form.resetFields();
       setLines([
@@ -133,27 +132,59 @@ export function JournalVouchersPage() {
     }
   };
 
+  // Metrics
+  const totalPostings = entries.length;
+  const totalDebitedValuePaise = entries.reduce((acc, e) => acc + (e.debitAmountPaise || 0), 0);
+
+  const filteredEntries = useMemo(() => {
+    if (!searchQuery.trim()) return entries;
+    const q = searchQuery.toLowerCase();
+    return entries.filter(
+      (e) =>
+        e.entryNumber?.toLowerCase().includes(q) ||
+        e.documentNumber?.toLowerCase().includes(q) ||
+        e.accountName?.toLowerCase().includes(q) ||
+        e.accountCode?.toLowerCase().includes(q) ||
+        e.narration?.toLowerCase().includes(q) ||
+        e.lineNarration?.toLowerCase().includes(q)
+    );
+  }, [entries, searchQuery]);
+
   const columns = [
     {
       title: 'Posting Date',
       dataIndex: 'postingDate',
       key: 'postingDate',
-      render: (val: string) => dayjs(val).format('DD MMM YYYY'),
+      width: 130,
+      render: (val: string) => (
+        <span className="text-slate-600 dark:text-slate-300 font-medium">
+          {dayjs(val).format('DD MMM YYYY')}
+        </span>
+      ),
     },
     {
       title: 'Entry / Doc #',
       dataIndex: 'entryNumber',
       key: 'entryNumber',
-      render: (val: string, r: JournalEntry) => val || r.documentNumber || 'JV-MANUAL',
+      width: 160,
+      render: (val: string, r: JournalEntry) => (
+        <span className="font-mono text-xs font-semibold text-indigo-600 dark:text-indigo-400">
+          {val || r.documentNumber || 'JV-MANUAL'}
+        </span>
+      ),
     },
     {
       title: 'Account',
       key: 'account',
       render: (_: any, r: JournalEntry) => (
-        <span>
-          <Tag color="blue" style={{ marginRight: 8 }}>{r.accountCode}</Tag>
-          <Text strong>{r.accountName}</Text>
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="px-2 py-0.5 rounded text-xs font-mono font-medium bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+            {r.accountCode}
+          </span>
+          <span className="font-medium text-slate-900 dark:text-white">
+            {r.accountName}
+          </span>
+        </div>
       ),
     },
     {
@@ -161,49 +192,136 @@ export function JournalVouchersPage() {
       dataIndex: 'debitAmountPaise',
       key: 'debitAmountPaise',
       align: 'right' as const,
-      render: (val: number) => <AmountDisplay paise={val} variant="debit" />,
+      width: 140,
+      render: (val: number) => <AmountDisplay paise={val} variant="debit" bold />,
     },
     {
       title: 'Credit (₹)',
       dataIndex: 'creditAmountPaise',
       key: 'creditAmountPaise',
       align: 'right' as const,
-      render: (val: number) => <AmountDisplay paise={val} variant="credit" />,
+      width: 140,
+      render: (val: number) => <AmountDisplay paise={val} variant="credit" bold />,
     },
     {
       title: 'Narration',
       dataIndex: 'narration',
       key: 'narration',
-      render: (val: string, r: JournalEntry) => val || r.lineNarration || '—',
+      render: (val: string, r: JournalEntry) => (
+        <span className="text-xs text-slate-500 dark:text-slate-400 line-clamp-1">
+          {val || r.lineNarration || '—'}
+        </span>
+      ),
     },
   ];
 
   return (
-    <div style={{ padding: 24 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24, alignItems: 'center' }}>
-        <div>
-          <Title level={3} style={{ margin: 0 }}>
-            Journal Vouchers (JV)
-          </Title>
-          <Text type="secondary">Manual general ledger postings & double-entry adjustments</Text>
+    <div className="h-full flex flex-col bg-slate-50 dark:bg-slate-950 min-h-screen text-slate-900 dark:text-slate-100 transition-colors">
+      {/* Top Header Bar */}
+      <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0 transition-colors">
+        <div className="flex items-center space-x-3.5">
+          <div className="p-2.5 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/40 rounded-xl shadow-xs">
+            <BookOpen className="w-6 h-6" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mb-0.5">
+              <span>Accounting</span>
+              <span>/</span>
+              <span className="text-indigo-600 dark:text-indigo-400 font-medium">Journal Vouchers</span>
+            </div>
+            <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
+              Journal Vouchers (JV)
+            </h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Manual general ledger postings & double-entry adjustments
+            </p>
+          </div>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setIsModalOpen(true)}>
+        <button
+          onClick={() => setIsModalOpen(true)}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white rounded-xl shadow-xs text-sm font-semibold transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+        >
+          <Plus className="w-4 h-4" />
           New Journal Voucher
-        </Button>
+        </button>
       </div>
 
-      <Card>
-        <Table
-          rowKey="id"
-          loading={loading}
-          dataSource={entries}
-          columns={columns}
-          pagination={{ pageSize: 15 }}
-        />
-      </Card>
+      {/* Main Content Area */}
+      <div className="flex-1 p-6 space-y-6 overflow-auto">
+        {/* KPI Stats Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Total Postings</span>
+              <div className="p-2 bg-indigo-50 dark:bg-indigo-950/50 rounded-lg text-indigo-600 dark:text-indigo-400">
+                <Layers className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="text-2xl font-bold text-slate-900 dark:text-white mt-2">{totalPostings}</div>
+            <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">General ledger journal lines</div>
+          </div>
 
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Total Debited Value</span>
+              <div className="p-2 bg-emerald-50 dark:bg-emerald-950/50 rounded-lg text-emerald-600 dark:text-emerald-400">
+                <DollarSign className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-2">
+              <AmountDisplay paise={totalDebitedValuePaise} variant="debit" />
+            </div>
+            <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">Cumulative debited ledger balance</div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Ledger Invariant</span>
+              <div className="p-2 bg-blue-50 dark:bg-blue-950/50 rounded-lg text-blue-600 dark:text-blue-400">
+                <CheckCircle2 className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-2">
+              Balanced
+            </div>
+            <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">Double-entry debit = credit enforced</div>
+          </div>
+        </div>
+
+        {/* Search & Filter Bar */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-xs flex flex-col sm:flex-row items-center gap-3 transition-colors">
+          <div className="relative flex-1 w-full">
+            <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400 dark:text-slate-500" />
+            <input
+              type="text"
+              placeholder="Search by entry #, account name, code, or narration..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-4 py-2 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-white placeholder-slate-400 transition-colors"
+            />
+          </div>
+        </div>
+
+        {/* Table Container */}
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden transition-colors">
+          <Table
+            rowKey="id"
+            loading={loading}
+            dataSource={filteredEntries}
+            columns={columns}
+            pagination={{ pageSize: 15 }}
+          />
+        </div>
+      </div>
+
+      {/* Manual JV Modal */}
       <Modal
-        title="Create Manual Journal Voucher"
+        title={
+          <div className="flex items-center gap-2 font-bold text-base text-slate-900 dark:text-white">
+            <BookOpen className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+            Create Manual Journal Voucher
+          </div>
+        }
         open={isModalOpen}
         onCancel={async () => {
           if (await confirmClose(form, { content: 'You have an unsaved journal voucher. Discard it?' })) {
@@ -219,157 +337,182 @@ export function JournalVouchersPage() {
         footer={null}
       >
         <Form form={form} layout="vertical" onFinish={handleCreateJv} initialValues={{ postingDate: dayjs() }}>
-          <Space style={{ display: 'flex', gap: 16 }}>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
             <Form.Item
               name="postingDate"
               label="Posting Date"
               rules={[{ required: true, message: 'Date required' }]}
-              style={{ width: 220 }}
             >
-              <DatePicker format="YYYY-MM-DD" style={{ width: '100%' }} />
+              <DatePicker format="YYYY-MM-DD" className="w-full" />
             </Form.Item>
 
-            <Form.Item name="narration" label="Header Narration" style={{ flex: 1 }}>
-              <Input placeholder="Reason for manual journal entry" />
-            </Form.Item>
-          </Space>
+            <div className="sm:col-span-2">
+              <Form.Item name="narration" label="Header Narration">
+                <Input placeholder="Business reason for manual journal entry" />
+              </Form.Item>
+            </div>
+          </div>
 
-          <Title level={5}>Journal Lines (Double-Entry)</Title>
-          <Table
-            pagination={false}
-            dataSource={lines.map((l, idx) => ({ ...l, key: idx }))}
-            columns={[
-              {
-                title: 'Account',
-                key: 'account',
-                width: 300,
-                render: (_, __, idx) => (
-                  <Select
-                    showSearch
-                    placeholder="Select Account"
-                    value={lines[idx].accountId || undefined}
-                    onChange={(val) => handleLineChange(idx, 'accountId', val)}
-                    filterOption={(input, option) =>
-                      ((option?.label ?? '') as string).toLowerCase().includes(input.toLowerCase())
-                    }
-                    options={coaAccounts.map((a) => ({
-                      value: a.id,
-                      label: `${a.code} — ${a.name} (${a.accountType})`,
-                    }))}
-                    style={{ width: '100%' }}
-                  />
-                ),
-              },
-              {
-                title: 'Debit (₹)',
-                key: 'debit',
-                width: 150,
-                render: (_, __, idx) => (
-                  <InputNumber
-                    min={0}
-                    precision={2}
-                    value={lines[idx].debitAmountRupees}
-                    onChange={(val) => {
-                      handleLineChange(idx, 'debitAmountRupees', val || 0);
-                      if (val && val > 0) handleLineChange(idx, 'creditAmountRupees', 0);
-                    }}
-                    style={{ width: '100%' }}
-                  />
-                ),
-              },
-              {
-                title: 'Credit (₹)',
-                key: 'credit',
-                width: 150,
-                render: (_, __, idx) => (
-                  <InputNumber
-                    min={0}
-                    precision={2}
-                    value={lines[idx].creditAmountRupees}
-                    onChange={(val) => {
-                      handleLineChange(idx, 'creditAmountRupees', val || 0);
-                      if (val && val > 0) handleLineChange(idx, 'debitAmountRupees', 0);
-                    }}
-                    style={{ width: '100%' }}
-                  />
-                ),
-              },
-              {
-                title: 'Line Narration',
-                key: 'lineNarration',
-                render: (_, __, idx) => (
-                  <Input
-                    placeholder="Line note"
-                    value={lines[idx].narration}
-                    onChange={(e) => handleLineChange(idx, 'narration', e.target.value)}
-                  />
-                ),
-              },
-              {
-                title: 'Action',
-                key: 'action',
-                width: 70,
-                render: (_, __, idx) => (
-                  <Button type="link" danger onClick={() => handleRemoveLine(idx)}>
-                    Remove
-                  </Button>
-                ),
-              },
-            ]}
-          />
+          <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden mb-4">
+            <Table
+              pagination={false}
+              dataSource={lines.map((l, idx) => ({ ...l, key: idx }))}
+              columns={[
+                {
+                  title: 'Account',
+                  key: 'account',
+                  width: 320,
+                  render: (_, __, idx) => (
+                    <Select
+                      showSearch
+                      placeholder="Select Account"
+                      value={lines[idx].accountId || undefined}
+                      onChange={(val) => handleLineChange(idx, 'accountId', val)}
+                      filterOption={(input, option) =>
+                        ((option?.label ?? '') as string).toLowerCase().includes(input.toLowerCase())
+                      }
+                      options={coaAccounts.map((a) => ({
+                        value: a.id,
+                        label: `${a.code} — ${a.name} (${a.accountType})`,
+                      }))}
+                      className="w-full"
+                    />
+                  ),
+                },
+                {
+                  title: 'Debit (₹)',
+                  key: 'debit',
+                  width: 140,
+                  render: (_, __, idx) => (
+                    <InputNumber
+                      min={0}
+                      precision={2}
+                      value={lines[idx].debitAmountRupees}
+                      onChange={(val) => {
+                        handleLineChange(idx, 'debitAmountRupees', val || 0);
+                        if (val && val > 0) handleLineChange(idx, 'creditAmountRupees', 0);
+                      }}
+                      className="w-full"
+                    />
+                  ),
+                },
+                {
+                  title: 'Credit (₹)',
+                  key: 'credit',
+                  width: 140,
+                  render: (_, __, idx) => (
+                    <InputNumber
+                      min={0}
+                      precision={2}
+                      value={lines[idx].creditAmountRupees}
+                      onChange={(val) => {
+                        handleLineChange(idx, 'creditAmountRupees', val || 0);
+                        if (val && val > 0) handleLineChange(idx, 'debitAmountRupees', 0);
+                      }}
+                      className="w-full"
+                    />
+                  ),
+                },
+                {
+                  title: 'Line Narration',
+                  key: 'lineNarration',
+                  render: (_, __, idx) => (
+                    <Input
+                      placeholder="Line note"
+                      value={lines[idx].narration}
+                      onChange={(e) => handleLineChange(idx, 'narration', e.target.value)}
+                    />
+                  ),
+                },
+                {
+                  title: 'Action',
+                  key: 'action',
+                  width: 60,
+                  align: 'center' as const,
+                  render: (_, __, idx) => (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveLine(idx)}
+                      className="p-1 text-slate-400 hover:text-red-500 rounded transition-colors"
+                      title="Remove line"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  ),
+                },
+              ]}
+            />
+          </div>
 
-          <Button type="dashed" onClick={handleAddLine} block icon={<PlusOutlined />} style={{ marginTop: 12 }}>
-            Add Line
-          </Button>
+          <button
+            type="button"
+            onClick={handleAddLine}
+            className="w-full py-2 border-2 border-dashed border-slate-200 dark:border-slate-800 hover:border-indigo-400 dark:hover:border-indigo-600 rounded-xl text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 flex items-center justify-center gap-1.5 transition-all mb-4"
+          >
+            <Plus className="w-4 h-4" />
+            Add Journal Line
+          </button>
 
-          <Card style={{ marginTop: 16, background: '#fafafa' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          {/* Balance Verification Bar */}
+          <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 mb-4">
+            <div className="flex flex-col sm:flex-row justify-between items-center gap-3">
               <div>
                 {isBalanced ? (
-                  <Tag color="success" icon={<CheckCircleOutlined />}>
-                    Double-Entry Balanced
+                  <Tag color="success" className="px-2.5 py-1 text-xs font-semibold rounded-lg">
+                    ✓ Double-Entry Balanced
                   </Tag>
                 ) : (
-                  <Tag color="error" icon={<ExclamationCircleOutlined />}>
-                    Unbalanced Entry
+                  <Tag color="error" className="px-2.5 py-1 text-xs font-semibold rounded-lg">
+                    ✕ Unbalanced Entry
                   </Tag>
                 )}
               </div>
-              <Space size="large">
+              <div className="flex items-center gap-6 text-sm">
                 <div>
-                  <Text type="secondary">Total Debit: </Text>
+                  <span className="text-slate-500 dark:text-slate-400 text-xs mr-2">Total Debit:</span>
                   <AmountDisplay paise={totalDebitPaise} variant="debit" bold />
                 </div>
                 <div>
-                  <Text type="secondary">Total Credit: </Text>
+                  <span className="text-slate-500 dark:text-slate-400 text-xs mr-2">Total Credit:</span>
                   <AmountDisplay paise={totalCreditPaise} variant="credit" bold />
                 </div>
                 <div>
-                  <Text type="secondary">Difference: </Text>
+                  <span className="text-slate-500 dark:text-slate-400 text-xs mr-2">Difference:</span>
                   <AmountDisplay paise={Math.abs(totalDebitPaise - totalCreditPaise)} variant="neutral" bold />
                 </div>
-              </Space>
+              </div>
             </div>
-          </Card>
+          </div>
 
           {!isBalanced && (
             <Alert
               type="warning"
-              message="Total debit must equal total credit before submitting."
+              message="Total debit must equal total credit before posting."
               showIcon
-              style={{ marginTop: 12 }}
+              className="mb-4"
             />
           )}
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 24 }}>
-            <Button onClick={() => setIsModalOpen(false)}>Cancel</Button>
-            <Button type="primary" htmlType="submit" disabled={!isBalanced}>
+          <div className="flex justify-end gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={() => setIsModalOpen(false)}
+              className="px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-sm font-medium hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-all"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!isBalanced}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 disabled:opacity-50 text-white rounded-xl text-sm font-semibold shadow-xs transition-all"
+            >
               Post Journal Voucher
-            </Button>
+            </button>
           </div>
         </Form>
       </Modal>
     </div>
   );
 }
+
 export default JournalVouchersPage;

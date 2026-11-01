@@ -5,6 +5,7 @@ import {
   message, theme as antTheme,
 } from 'antd';
 import { PlusOutlined, EditOutlined } from '@ant-design/icons';
+import { FolderTree, Plus, Layers, CheckCircle2, ShieldCheck, GitFork } from 'lucide-react';
 import { mastersApi, type ItemGroup } from '../../api/masters';
 import { usePlantStore } from '../../store/plant';
 
@@ -117,26 +118,111 @@ export function ItemGroupsPage() {
     },
   ];
 
+  const activeGroups = groups.filter(g => g.isActive).length;
+  const subGroupCount = groups.filter(g => g.parentId).length;
+
   return (
-    <div>
-      <div className="mb-5 flex justify-between items-start">
-        <div>
-          <h2 className="m-0 font-bold text-lg text-slate-900 dark:text-white">Item Groups</h2>
-          <span className="text-[13px] text-slate-500 dark:text-slate-400">Hierarchical classification for reporting and defaults.</span>
+    <div className="h-full flex flex-col bg-slate-50 dark:bg-slate-950 min-h-screen text-slate-900 dark:text-slate-100 transition-colors">
+      {/* Top Header Bar */}
+      <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0 transition-colors">
+        <div className="flex items-center space-x-3.5">
+          <div className="p-2.5 bg-teal-50 dark:bg-teal-950/50 text-teal-600 dark:text-teal-400 border border-teal-100 dark:border-teal-900/40 rounded-xl shadow-xs">
+            <FolderTree className="w-6 h-6" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mb-0.5">
+              <span>Masters</span>
+              <span>/</span>
+              <span className="text-teal-600 dark:text-teal-400 font-medium">Item Groups</span>
+            </div>
+            <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
+              Item Groups & Taxonomy
+            </h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Hierarchical classification for inventory costing, category defaults, and sales reporting
+            </p>
+          </div>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => open(null)}>Add Group</Button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => open(null)}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-teal-600 hover:bg-teal-700 active:bg-teal-800 text-white rounded-xl shadow-xs text-sm font-semibold transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+          >
+            <Plus className="w-4 h-4" /> Add Group
+          </button>
+        </div>
       </div>
 
-      <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
-        <Table
-          dataSource={tree}
-          columns={columns}
-          rowKey="id"
-          loading={loading}
-          pagination={false}
-          expandable={{ defaultExpandAllRows: true }}
-          locale={{ emptyText: 'No item groups yet.' }}
-        />
+      {/* Main Content Area */}
+      <div className="p-6 max-w-7xl mx-auto w-full flex-1 flex flex-col gap-6">
+        {/* KPI Stats Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Total Item Groups</span>
+              <div className="p-2 bg-teal-50 dark:bg-teal-950/50 rounded-lg text-teal-600 dark:text-teal-400">
+                <FolderTree className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="text-2xl font-bold text-slate-900 dark:text-white mt-2">{groups.length}</div>
+            <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">Configured category nodes</div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Root Categories</span>
+              <div className="p-2 bg-blue-50 dark:bg-blue-950/50 rounded-lg text-blue-600 dark:text-blue-400">
+                <Layers className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-2">{tree.length}</div>
+            <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">Top-level product families</div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Child Sub-Groups</span>
+              <div className="p-2 bg-purple-50 dark:bg-purple-950/50 rounded-lg text-purple-600 dark:text-purple-400">
+                <GitFork className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="text-2xl font-bold text-purple-600 dark:text-purple-400 mt-2">{subGroupCount}</div>
+            <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">Sub-branches and sub-categories</div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Active Groups</span>
+              <div className="p-2 bg-emerald-50 dark:bg-emerald-950/50 rounded-lg text-emerald-600 dark:text-emerald-400">
+                <CheckCircle2 className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-2">{activeGroups}</div>
+            <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">Currently active classifications</div>
+          </div>
+        </div>
+
+        {/* Table Container Card */}
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden transition-colors">
+          <div className="p-4 border-b border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900 dark:text-white">Item Group Taxonomy Tree</h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Expandable tree structure of parent and nested product classifications</p>
+            </div>
+            <span className="text-xs px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-medium">
+              {groups.length} Groups
+            </span>
+          </div>
+          <Table
+            dataSource={tree}
+            columns={columns}
+            rowKey="id"
+            loading={loading}
+            pagination={false}
+            expandable={{ defaultExpandAllRows: true }}
+            locale={{ emptyText: 'No item groups yet.' }}
+          />
+        </div>
       </div>
 
       <Drawer
