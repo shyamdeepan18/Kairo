@@ -11,6 +11,7 @@ import salesPlugin from './plugins/sales.js';
 import manufacturingPlugin from './plugins/manufacturing.js';
 import governancePlugin from './plugins/governance.js';
 import auditPlugin from './plugins/audit.js';
+import errorHandlerPlugin from './plugins/error-handler.js';
 import authRoutes from './routes/auth.js';
 import companyRoutes from './routes/companies.js';
 import settingsRoutes from './routes/settings.js';
@@ -58,6 +59,9 @@ async function start() {
 
   // Auth plugin: JWT + cookie support + authenticate decorator
   await app.register(authPlugin);
+
+  // Global Error Handler for DB constraints, unique violations, and validation
+  await app.register(errorHandlerPlugin);
 
   // Global Audit logging plugin for mutations
   await app.register(auditPlugin);

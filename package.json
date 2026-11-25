@@ -8,9 +8,21 @@
     "lint": "turbo lint",
     "db:generate": "pnpm --filter @erp/db db:generate",
     "db:migrate": "pnpm --filter @erp/db db:migrate",
-    "db:studio": "pnpm --filter @erp/db db:studio"
+    "db:studio": "pnpm --filter @erp/db db:studio",
+    "test": "playwright test",
+    "test:e2e": "playwright test tests/e2e",
+    "test:p2p": "playwright test tests/e2e/p2p tests/integration/api/p2p-api.spec.ts",
+    "test:o2c": "playwright test tests/e2e/o2c tests/integration/api/o2c-api.spec.ts",
+    "test:subcontracting": "playwright test tests/e2e/subcontracting tests/integration/api/subcontracting-api.spec.ts",
+    "test:integration": "playwright test tests/integration",
+    "test:regression": "playwright test",
+    "test:smoke": "playwright test tests/e2e/smoke.spec.ts",
+    "test:report": "playwright show-report docs/qa/reports/playwright-html"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "dotenv": "^18.0.9",
+    "postgres": "^3.4.4",
     "turbo": "^2.0.0",
     "typescript": "^5.4.0"
   }

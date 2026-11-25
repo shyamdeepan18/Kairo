@@ -1529,9 +1529,16 @@ function registerLandedCostVouchers(app: FastifyInstance) {
       db.select().from(lcvAllocatedItems).where(eq(lcvAllocatedItems.lcvId, id)),
     ]);
 
-    const result = await db.transaction(async (tx) => {
-      let totalAbsorbed = 0;
-      let totalCogsVariance = 0;
+    const itemIds = [...new Set(allocatedRows.map((r) => r.itemId))];
+    const itemRows = itemIds.length > 0
+      ? await db.select({ id: items.id, uom: items.primaryUom }).from(items).where(inArray(items.id, itemIds))
+      : [];
+    const itemUomMap = new Map(itemRows.map((i) => [i.id, i.uom]));
+
+    try {
+      const result = await db.transaction(async (tx) => {
+        let totalAbsorbed = 0;
+        let totalCogsVariance = 0;
 
       for (const row of allocatedRows) {
         const [balance] = await tx
@@ -1562,7 +1569,7 @@ function registerLandedCostVouchers(app: FastifyInstance) {
             itemId: row.itemId,
             movementType: 'adjustment_in',
             quantity: 0,
-            uom: 'PCS',
+            uom: itemUomMap.get(row.itemId) || 'NOS',
             valuationAmountPaise: absorbed,
             valuationRatePaise: 0,
             documentType: DOC,
@@ -1634,6 +1641,9 @@ function registerLandedCostVouchers(app: FastifyInstance) {
     });
 
     return reply.send({ ok: true, ...result });
+    } catch (err: any) {
+      return reply.code(409).send({ error: 'LCV post failed', detail: err.message });
+    }
   });
 
   simpleTransition(app, { route: '/landed-cost-vouchers/:id/cancel', table: landedCostVouchers, docType: DOC, to: 'cancelled', perm: 'purchase.lcv.cancel' });

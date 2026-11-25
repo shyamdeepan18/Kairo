@@ -1065,6 +1065,8 @@ export default async function adminRoutes(app: FastifyInstance) {
       });
     });
 
+    await (app as any).licenseService.invalidate(id);
+
     return reply.send({ success: true, blueprint: bp });
   });
 
@@ -1102,6 +1104,8 @@ export default async function adminRoutes(app: FastifyInstance) {
       entityId: id,
       details: { module, isEnabled: !!isEnabled },
     });
+
+    await (app as any).licenseService.invalidate(id);
 
     return reply.send({ success: true, module, isEnabled: !!isEnabled });
   });

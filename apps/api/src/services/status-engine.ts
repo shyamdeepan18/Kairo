@@ -11,6 +11,7 @@ export type DocumentStatus =
   | 'draft'
   | 'submitted'
   | 'approved'
+  | 'in_progress'
   | 'dispatched'
   | 'completed'
   | 'rejected'
@@ -168,6 +169,27 @@ const TRANSITIONS: Record<string, Partial<Record<DocumentStatus, DocumentStatus[
     approved:  ['cancelled'],
     cancelled: [],
   },
+  'sales.return': {
+    draft:     ['submitted'],
+    submitted: ['approved', 'rejected'],
+    rejected:  ['draft'],
+    approved:  ['cancelled'],
+    cancelled: [],
+  },
+  'sales.credit_note': {
+    draft:     ['submitted'],
+    submitted: ['approved', 'rejected'],
+    rejected:  ['draft'],
+    approved:  ['cancelled'],
+    cancelled: [],
+  },
+  'manufacturing.bom': {
+    draft:     ['submitted'],
+    submitted: ['approved', 'rejected'],
+    rejected:  ['draft'],
+    approved:  ['cancelled'],
+    cancelled: [],
+  },
   'manufacturing.order': {
     draft:     ['submitted'],
     submitted: ['approved', 'rejected'],
@@ -175,6 +197,16 @@ const TRANSITIONS: Record<string, Partial<Record<DocumentStatus, DocumentStatus[
     approved:  ['closed', 'cancelled'],
     closed:    [],
     cancelled: [],
+  },
+  'manufacturing.job_work_order': {
+    draft:       ['submitted', 'cancelled'],
+    submitted:   ['approved', 'rejected', 'draft'],
+    rejected:    ['draft'],
+    approved:    ['in_progress', 'completed', 'closed', 'cancelled'],
+    in_progress: ['completed', 'closed', 'cancelled'],
+    completed:   ['closed'],
+    closed:      [],
+    cancelled:   [],
   },
 };
 

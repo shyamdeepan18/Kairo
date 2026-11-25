@@ -102,7 +102,7 @@ function PartyPage({ kind }: PartyPageProps) {
       setDrawer(false);
       load(q || undefined);
     } catch (e: any) {
-      message.error(e?.response?.data?.error ?? 'Save failed');
+      message.error(e?.response?.data?.error ?? e?.response?.data?.message ?? 'Save failed');
     } finally {
       setSaving(false);
     }

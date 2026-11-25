@@ -1,0 +1,1613 @@
+{
+  "config": {
+    "argv": [
+      "/opt/homebrew/Cellar/node/25.9.0_2/bin/node",
+      "/Users/shyam18/SEGA/ERP/node_modules/@playwright/test/cli.js",
+      "test"
+    ],
+    "configFile": "/Users/shyam18/SEGA/ERP/playwright.config.ts",
+    "rootDir": "/Users/shyam18/SEGA/ERP/tests",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/Users/shyam18/SEGA/ERP/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "/Users/shyam18/SEGA/ERP/tests",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 60000
+      }
+    ],
+    "filteredProjects": [
+      {
+        "grep": {},
+        "grepInvert": null,
+        "outputDir": "/Users/shyam18/SEGA/ERP/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "name": "chromium",
+        "testDir": "/Users/shyam18/SEGA/ERP/tests",
+        "snapshotDir": "/Users/shyam18/SEGA/ERP/tests",
+        "testIgnore": [],
+        "testMatch": "**/*.@(spec|test).?(c|m)[jt]s?(x)",
+        "timeout": 60000,
+        "use": {
+          "baseURL": "http://localhost:5173",
+          "trace": "retain-on-failure",
+          "screenshot": "only-on-failure",
+          "video": "retain-on-failure",
+          "actionTimeout": 15000,
+          "navigationTimeout": 30000,
+          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.8078.4 Safari/537.36",
+          "viewport": {
+            "width": 1440,
+            "height": 900
+          },
+          "screen": {
+            "width": 1920,
+            "height": 1080
+          },
+          "deviceScaleFactor": 1,
+          "isMobile": false,
+          "hasTouch": false,
+          "defaultBrowserType": "chromium"
+        },
+        "dependencies": [],
+        "ignoreSnapshots": false,
+        "__projectId": "chromium"
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list",
+        null
+      ],
+      [
+        "json",
+        {
+          "outputFile": "docs/qa/reports/test-results.json"
+        }
+      ],
+      [
+        "html",
+        {
+          "outputFolder": "docs/qa/reports/playwright-html",
+          "open": "never"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "default",
+    "updateSourceMethod": "patch",
+    "version": "1.64.1",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "e2e/smoke.spec.ts",
+      "file": "e2e/smoke.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "ERP Smoke Suite — Core Shell & Navigation",
+          "file": "e2e/smoke.spec.ts",
+          "line": 5,
+          "column": 6,
+          "specs": [
+            {
+              "title": "User can log in, select company, and navigate across all modules without crash",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 533,
+                      "error": {
+                        "message": "Error: page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:5173/login\nCall log:\n\u001b[2m  - navigating to \"http://localhost:5173/login\", waiting until \"load\"\u001b[22m\n",
+                        "stack": "Error: page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:5173/login\nCall log:\n\u001b[2m  - navigating to \"http://localhost:5173/login\", waiting until \"load\"\u001b[22m\n\n    at LoginPage.goto (/Users/shyam18/SEGA/ERP/tests/page-objects/LoginPage.ts:11:21)\n    at /Users/shyam18/SEGA/ERP/tests/e2e/smoke.spec.ts:11:21",
+                        "location": {
+                          "file": "/Users/shyam18/SEGA/ERP/tests/page-objects/LoginPage.ts",
+                          "column": 21,
+                          "line": 11
+                        },
+                        "snippet": "   at page-objects/LoginPage.ts:11\n\n   9 |\n  10 |   async goto() {\n> 11 |     await this.page.goto('/login');\n     |                     ^\n  12 |     await this.page.waitForLoadState('domcontentloaded');\n  13 |   }\n  14 |"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "/Users/shyam18/SEGA/ERP/tests/page-objects/LoginPage.ts",
+                            "column": 21,
+                            "line": 11
+                          },
+                          "message": "Error: page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:5173/login\nCall log:\n\u001b[2m  - navigating to \"http://localhost:5173/login\", waiting until \"load\"\u001b[22m\n\n\n   at page-objects/LoginPage.ts:11\n\n   9 |\n  10 |   async goto() {\n> 11 |     await this.page.goto('/login');\n     |                     ^\n  12 |     await this.page.waitForLoadState('domcontentloaded');\n  13 |   }\n  14 |\n    at LoginPage.goto (/Users/shyam18/SEGA/ERP/tests/page-objects/LoginPage.ts:11:21)\n    at /Users/shyam18/SEGA/ERP/tests/e2e/smoke.spec.ts:11:21"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-11-25T16:56:59.645Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/e2e-smoke-ERP-Smoke-Suite--72c1a-s-all-modules-without-crash-chromium/test-failed-1.png"
+                        },
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/e2e-smoke-ERP-Smoke-Suite--72c1a-s-all-modules-without-crash-chromium/video.webm"
+                        },
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/e2e-smoke-ERP-Smoke-Suite--72c1a-s-all-modules-without-crash-chromium/error-context.md"
+                        },
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/e2e-smoke-ERP-Smoke-Suite--72c1a-s-all-modules-without-crash-chromium/trace.zip"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "/Users/shyam18/SEGA/ERP/tests/page-objects/LoginPage.ts",
+                        "column": 21,
+                        "line": 11
+                      }
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "aa58ad17b2d44b8d86cc-21a5727c6ad4a255c8f4",
+              "file": "e2e/smoke.spec.ts",
+              "line": 6,
+              "column": 7
+            },
+            {
+              "title": "Invalid credentials trigger appropriate validation alert",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 1,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 175,
+                      "error": {
+                        "message": "Error: page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:5173/login\nCall log:\n\u001b[2m  - navigating to \"http://localhost:5173/login\", waiting until \"load\"\u001b[22m\n",
+                        "stack": "Error: page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:5173/login\nCall log:\n\u001b[2m  - navigating to \"http://localhost:5173/login\", waiting until \"load\"\u001b[22m\n\n    at LoginPage.goto (/Users/shyam18/SEGA/ERP/tests/page-objects/LoginPage.ts:11:21)\n    at /Users/shyam18/SEGA/ERP/tests/e2e/smoke.spec.ts:59:21",
+                        "location": {
+                          "file": "/Users/shyam18/SEGA/ERP/tests/page-objects/LoginPage.ts",
+                          "column": 21,
+                          "line": 11
+                        },
+                        "snippet": "   at page-objects/LoginPage.ts:11\n\n   9 |\n  10 |   async goto() {\n> 11 |     await this.page.goto('/login');\n     |                     ^\n  12 |     await this.page.waitForLoadState('domcontentloaded');\n  13 |   }\n  14 |"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "/Users/shyam18/SEGA/ERP/tests/page-objects/LoginPage.ts",
+                            "column": 21,
+                            "line": 11
+                          },
+                          "message": "Error: page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:5173/login\nCall log:\n\u001b[2m  - navigating to \"http://localhost:5173/login\", waiting until \"load\"\u001b[22m\n\n\n   at page-objects/LoginPage.ts:11\n\n   9 |\n  10 |   async goto() {\n> 11 |     await this.page.goto('/login');\n     |                     ^\n  12 |     await this.page.waitForLoadState('domcontentloaded');\n  13 |   }\n  14 |\n    at LoginPage.goto (/Users/shyam18/SEGA/ERP/tests/page-objects/LoginPage.ts:11:21)\n    at /Users/shyam18/SEGA/ERP/tests/e2e/smoke.spec.ts:59:21"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-11-25T16:57:02.190Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/e2e-smoke-ERP-Smoke-Suite--8a218-ppropriate-validation-alert-chromium/test-failed-1.png"
+                        },
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/e2e-smoke-ERP-Smoke-Suite--8a218-ppropriate-validation-alert-chromium/video.webm"
+                        },
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/e2e-smoke-ERP-Smoke-Suite--8a218-ppropriate-validation-alert-chromium/error-context.md"
+                        },
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/e2e-smoke-ERP-Smoke-Suite--8a218-ppropriate-validation-alert-chromium/trace.zip"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "/Users/shyam18/SEGA/ERP/tests/page-objects/LoginPage.ts",
+                        "column": 21,
+                        "line": 11
+                      }
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "aa58ad17b2d44b8d86cc-9ced8d3578d645e91343",
+              "file": "e2e/smoke.spec.ts",
+              "line": 57,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "integration/api/accounting-api.spec.ts",
+      "file": "integration/api/accounting-api.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "Accounting, General Ledger & Project Accounting (GAP 8)",
+          "file": "integration/api/accounting-api.spec.ts",
+          "line": 6,
+          "column": 6,
+          "specs": [
+            {
+              "title": "Balanced Journal Voucher (JV) Creation & Double-Entry Integrity",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 2,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 0,
+                      "error": {
+                        "message": "TypeError: fetch failed",
+                        "stack": "TypeError: fetch failed",
+                        "cause": {
+                          "message": "AggregateError: ",
+                          "stack": "AggregateError: "
+                        }
+                      },
+                      "errors": [
+                        {
+                          "message": "TypeError: fetch failed\n[cause]: AggregateError: "
+                        },
+                        {
+                          "location": {
+                            "file": "/Users/shyam18/SEGA/ERP/tests/integration/api/accounting-api.spec.ts",
+                            "column": 23,
+                            "line": 20
+                          },
+                          "message": "TypeError: Cannot read properties of undefined (reading 'close')\n\n  18 |\n  19 |   test.afterAll(async () => {\n> 20 |     await dbValidator.close();\n     |                       ^\n  21 |   });\n  22 |\n  23 |   test('Balanced Journal Voucher (JV) Creation & Double-Entry Integrity', async () => {\n    at /Users/shyam18/SEGA/ERP/tests/integration/api/accounting-api.spec.ts:20:23"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-11-25T16:57:02.744Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-api-accounting-ea0e6-tion-Double-Entry-Integrity-chromium/error-context.md"
+                        },
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-api-accounting-ea0e6-tion-Double-Entry-Integrity-chromium/error-context.md"
+                        },
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-api-accounting-ea0e6-tion-Double-Entry-Integrity-chromium/trace.zip"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "e614796056732edb2769-ffc68b248e731c75d326",
+              "file": "integration/api/accounting-api.spec.ts",
+              "line": 23,
+              "column": 7
+            },
+            {
+              "title": "Negative Validation: Unbalanced Journal Voucher is Rejected",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": -1,
+                      "parallelIndex": -1,
+                      "status": "skipped",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-11-25T16:57:02.789Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "skipped"
+                }
+              ],
+              "id": "e614796056732edb2769-b3b52302c5c26022cb3a",
+              "file": "integration/api/accounting-api.spec.ts",
+              "line": 68,
+              "column": 7
+            },
+            {
+              "title": "Project Accounting (GAP 8): Project Lifecycle & Budget vs Actual Telemetry",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": -1,
+                      "parallelIndex": -1,
+                      "status": "skipped",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-11-25T16:57:02.791Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "skipped"
+                }
+              ],
+              "id": "e614796056732edb2769-e79a49f0cad032f20bc8",
+              "file": "integration/api/accounting-api.spec.ts",
+              "line": 101,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "integration/api/duplicate-validation.spec.ts",
+      "file": "integration/api/duplicate-validation.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "Duplicate Entity & Constraint Error Handling",
+          "file": "integration/api/duplicate-validation.spec.ts",
+          "line": 5,
+          "column": 6,
+          "specs": [
+            {
+              "title": "Duplicate Vendor ID / Supplier Code returns 409 Conflict with friendly warning message",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 3,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 0,
+                      "error": {
+                        "message": "TypeError: fetch failed",
+                        "stack": "TypeError: fetch failed",
+                        "cause": {
+                          "message": "AggregateError: ",
+                          "stack": "AggregateError: "
+                        }
+                      },
+                      "errors": [
+                        {
+                          "message": "TypeError: fetch failed\n[cause]: AggregateError: "
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-11-25T16:57:03.051Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-api-duplicate--a392c-th-friendly-warning-message-chromium/error-context.md"
+                        },
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-api-duplicate--a392c-th-friendly-warning-message-chromium/trace.zip"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "8292adf7992709d21ce3-d619de9ecc439f4c2761",
+              "file": "integration/api/duplicate-validation.spec.ts",
+              "line": 18,
+              "column": 7
+            },
+            {
+              "title": "Duplicate Customer Code returns 409 Conflict with friendly warning message",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": -1,
+                      "parallelIndex": -1,
+                      "status": "skipped",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-11-25T16:57:03.089Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "skipped"
+                }
+              ],
+              "id": "8292adf7992709d21ce3-dd2163b104b15e713801",
+              "file": "integration/api/duplicate-validation.spec.ts",
+              "line": 47,
+              "column": 7
+            },
+            {
+              "title": "Duplicate Item Group Code returns 409 Conflict with friendly warning message",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": -1,
+                      "parallelIndex": -1,
+                      "status": "skipped",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-11-25T16:57:03.091Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "skipped"
+                }
+              ],
+              "id": "8292adf7992709d21ce3-c9a718ebc2123d1ac022",
+              "file": "integration/api/duplicate-validation.spec.ts",
+              "line": 72,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "integration/api/extended-modules.spec.ts",
+      "file": "integration/api/extended-modules.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "Extended ERP Modules & Workflow Validation",
+          "file": "integration/api/extended-modules.spec.ts",
+          "line": 6,
+          "column": 6,
+          "specs": [
+            {
+              "title": "1. Blanket Purchase Order lifecycle (Draft -> Submit -> Approve)",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 4,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 0,
+                      "error": {
+                        "message": "TypeError: fetch failed",
+                        "stack": "TypeError: fetch failed",
+                        "cause": {
+                          "message": "AggregateError: ",
+                          "stack": "AggregateError: "
+                        }
+                      },
+                      "errors": [
+                        {
+                          "message": "TypeError: fetch failed\n[cause]: AggregateError: "
+                        },
+                        {
+                          "location": {
+                            "file": "/Users/shyam18/SEGA/ERP/tests/integration/api/extended-modules.spec.ts",
+                            "column": 24,
+                            "line": 20
+                          },
+                          "message": "TypeError: Cannot read properties of undefined (reading 'close')\n\n  18 |\n  19 |   test.afterAll(async () => {\n> 20 |     await finValidator.close();\n     |                        ^\n  21 |   });\n  22 |\n  23 |   test('1. Blanket Purchase Order lifecycle (Draft -> Submit -> Approve)', async () => {\n    at /Users/shyam18/SEGA/ERP/tests/integration/api/extended-modules.spec.ts:20:24"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-11-25T16:57:03.354Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-api-extended-m-6c965-e-Draft---Submit---Approve--chromium/error-context.md"
+                        },
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-api-extended-m-6c965-e-Draft---Submit---Approve--chromium/error-context.md"
+                        },
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-api-extended-m-6c965-e-Draft---Submit---Approve--chromium/trace.zip"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "6bf6235d5c2cf5302ed2-4194f06cb7bf09cc068d",
+              "file": "integration/api/extended-modules.spec.ts",
+              "line": 23,
+              "column": 7
+            },
+            {
+              "title": "2. Stock Adjustment lifecycle (Draft -> Submit -> Approve -> SLE & GL)",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": -1,
+                      "parallelIndex": -1,
+                      "status": "skipped",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-11-25T16:57:03.398Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "skipped"
+                }
+              ],
+              "id": "6bf6235d5c2cf5302ed2-5634495329562e437f9d",
+              "file": "integration/api/extended-modules.spec.ts",
+              "line": 53,
+              "column": 7
+            },
+            {
+              "title": "3. Stock Transfer lifecycle (Dispatch -> Receive -> Inter-warehouse balance)",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": -1,
+                      "parallelIndex": -1,
+                      "status": "skipped",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-11-25T16:57:03.401Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "skipped"
+                }
+              ],
+              "id": "6bf6235d5c2cf5302ed2-3cdf8376a7579a6988d2",
+              "file": "integration/api/extended-modules.spec.ts",
+              "line": 86,
+              "column": 7
+            },
+            {
+              "title": "4. Landed Cost Voucher (LCV) lifecycle & Valuation Roll-Up",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": -1,
+                      "parallelIndex": -1,
+                      "status": "skipped",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-11-25T16:57:03.403Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "skipped"
+                }
+              ],
+              "id": "6bf6235d5c2cf5302ed2-4362702388a338cf39e9",
+              "file": "integration/api/extended-modules.spec.ts",
+              "line": 145,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "integration/api/o2c-api.spec.ts",
+      "file": "integration/api/o2c-api.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "Order-to-Cash (O2C) Complete Business Cycle",
+          "file": "integration/api/o2c-api.spec.ts",
+          "line": 6,
+          "column": 6,
+          "specs": [
+            {
+              "title": "Full O2C Flow: Customer -> Inward Stock -> SO -> Reservation -> Dispatch -> Invoicing -> Receipt",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 5,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 0,
+                      "error": {
+                        "message": "TypeError: fetch failed",
+                        "stack": "TypeError: fetch failed",
+                        "cause": {
+                          "message": "AggregateError: ",
+                          "stack": "AggregateError: "
+                        }
+                      },
+                      "errors": [
+                        {
+                          "message": "TypeError: fetch failed\n[cause]: AggregateError: "
+                        },
+                        {
+                          "location": {
+                            "file": "/Users/shyam18/SEGA/ERP/tests/integration/api/o2c-api.spec.ts",
+                            "column": 23,
+                            "line": 20
+                          },
+                          "message": "TypeError: Cannot read properties of undefined (reading 'close')\n\n  18 |\n  19 |   test.afterAll(async () => {\n> 20 |     await dbValidator.close();\n     |                       ^\n  21 |   });\n  22 |\n  23 |   test('Full O2C Flow: Customer -> Inward Stock -> SO -> Reservation -> Dispatch -> Invoicing -> Receipt', async () => {\n    at /Users/shyam18/SEGA/ERP/tests/integration/api/o2c-api.spec.ts:20:23"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-11-25T16:57:03.667Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-api-o2c-api-Or-13d4e-patch---Invoicing---Receipt-chromium/error-context.md"
+                        },
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-api-o2c-api-Or-13d4e-patch---Invoicing---Receipt-chromium/error-context.md"
+                        },
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-api-o2c-api-Or-13d4e-patch---Invoicing---Receipt-chromium/trace.zip"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "9e6a54c709bca21e1b28-3fd16bc1439572be56ef",
+              "file": "integration/api/o2c-api.spec.ts",
+              "line": 23,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "integration/api/p2p-api.spec.ts",
+      "file": "integration/api/p2p-api.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "Procure-to-Pay (P2P) Complete Business Cycle",
+          "file": "integration/api/p2p-api.spec.ts",
+          "line": 6,
+          "column": 6,
+          "specs": [
+            {
+              "title": "Full P2P Flow: Supplier -> Item -> PO -> GRN -> Invoicing -> Payment & Verification",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 6,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 0,
+                      "error": {
+                        "message": "TypeError: fetch failed",
+                        "stack": "TypeError: fetch failed",
+                        "cause": {
+                          "message": "AggregateError: ",
+                          "stack": "AggregateError: "
+                        }
+                      },
+                      "errors": [
+                        {
+                          "message": "TypeError: fetch failed\n[cause]: AggregateError: "
+                        },
+                        {
+                          "location": {
+                            "file": "/Users/shyam18/SEGA/ERP/tests/integration/api/p2p-api.spec.ts",
+                            "column": 23,
+                            "line": 20
+                          },
+                          "message": "TypeError: Cannot read properties of undefined (reading 'close')\n\n  18 |\n  19 |   test.afterAll(async () => {\n> 20 |     await dbValidator.close();\n     |                       ^\n  21 |   });\n  22 |\n  23 |   test('Full P2P Flow: Supplier -> Item -> PO -> GRN -> Invoicing -> Payment & Verification', async () => {\n    at /Users/shyam18/SEGA/ERP/tests/integration/api/p2p-api.spec.ts:20:23"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-11-25T16:57:03.977Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-api-p2p-api-Pr-7c82b-cing---Payment-Verification-chromium/error-context.md"
+                        },
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-api-p2p-api-Pr-7c82b-cing---Payment-Verification-chromium/error-context.md"
+                        },
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-api-p2p-api-Pr-7c82b-cing---Payment-Verification-chromium/trace.zip"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "494d6abcf0224fe2e2a2-5a6135a9cf9f76d7378a",
+              "file": "integration/api/p2p-api.spec.ts",
+              "line": 23,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "integration/api/subcontracting-api.spec.ts",
+      "file": "integration/api/subcontracting-api.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "Subcontracting & Outside Job Work (GAP 4) Lifecycle",
+          "file": "integration/api/subcontracting-api.spec.ts",
+          "line": 6,
+          "column": 6,
+          "specs": [
+            {
+              "title": "Subcontracting Flow: Vendor -> JWO -> Outward Challan -> Inward Receipt & Cost Capitalization",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 7,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 0,
+                      "error": {
+                        "message": "TypeError: fetch failed",
+                        "stack": "TypeError: fetch failed",
+                        "cause": {
+                          "message": "AggregateError: ",
+                          "stack": "AggregateError: "
+                        }
+                      },
+                      "errors": [
+                        {
+                          "message": "TypeError: fetch failed\n[cause]: AggregateError: "
+                        },
+                        {
+                          "location": {
+                            "file": "/Users/shyam18/SEGA/ERP/tests/integration/api/subcontracting-api.spec.ts",
+                            "column": 23,
+                            "line": 20
+                          },
+                          "message": "TypeError: Cannot read properties of undefined (reading 'close')\n\n  18 |\n  19 |   test.afterAll(async () => {\n> 20 |     await dbValidator.close();\n     |                       ^\n  21 |   });\n  22 |\n  23 |   test('Subcontracting Flow: Vendor -> JWO -> Outward Challan -> Inward Receipt & Cost Capitalization', async () => {\n    at /Users/shyam18/SEGA/ERP/tests/integration/api/subcontracting-api.spec.ts:20:23"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-11-25T16:57:04.281Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-api-subcontrac-008b2-Receipt-Cost-Capitalization-chromium/error-context.md"
+                        },
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-api-subcontrac-008b2-Receipt-Cost-Capitalization-chromium/error-context.md"
+                        },
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-api-subcontrac-008b2-Receipt-Cost-Capitalization-chromium/trace.zip"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "572c488b1998ac974da7-8e8d0fd2e11a1f478ce7",
+              "file": "integration/api/subcontracting-api.spec.ts",
+              "line": 23,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "integration/database/database-invariants.spec.ts",
+      "file": "integration/database/database-invariants.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "Core ERP Architectural & Database Invariants",
+          "file": "integration/database/database-invariants.spec.ts",
+          "line": 4,
+          "column": 6,
+          "specs": [
+            {
+              "title": "Invariant 1 (Double-Entry Financial Equilibrium): All posted journal entries must strictly balance (Dr == Cr)",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 8,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 9,
+                      "error": {
+                        "message": "AggregateError: ",
+                        "stack": "AggregateError: \n    at cachedError (/Users/shyam18/SEGA/ERP/node_modules/.pnpm/postgres@3.4.9/node_modules/postgres/cjs/src/query.js:170:23)\n    at Query (/Users/shyam18/SEGA/ERP/node_modules/.pnpm/postgres@3.4.9/node_modules/postgres/cjs/src/query.js:36:24)\n    at DbValidator.sql (/Users/shyam18/SEGA/ERP/node_modules/.pnpm/postgres@3.4.9/node_modules/postgres/cjs/src/index.js:112:11)\n    at /Users/shyam18/SEGA/ERP/tests/integration/database/database-invariants.spec.ts:16:52",
+                        "location": {
+                          "file": "/Users/shyam18/SEGA/ERP/tests/integration/database/database-invariants.spec.ts",
+                          "column": 52,
+                          "line": 16
+                        },
+                        "snippet": "  14 |\n  15 |   test('Invariant 1 (Double-Entry Financial Equilibrium): All posted journal entries must strictly balance (Dr == Cr)', async () => {\n> 16 |     const unbalancedEntries = await dbValidator.sql`\n     |                                                    ^\n  17 |       SELECT je.id, je.entry_number, je.document_type,\n  18 |              SUM(jel.debit_amount_paise) as total_debit,\n  19 |              SUM(jel.credit_amount_paise) as total_credit,"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "/Users/shyam18/SEGA/ERP/tests/integration/database/database-invariants.spec.ts",
+                            "column": 52,
+                            "line": 16
+                          },
+                          "message": "AggregateError: \n\n  14 |\n  15 |   test('Invariant 1 (Double-Entry Financial Equilibrium): All posted journal entries must strictly balance (Dr == Cr)', async () => {\n> 16 |     const unbalancedEntries = await dbValidator.sql`\n     |                                                    ^\n  17 |       SELECT je.id, je.entry_number, je.document_type,\n  18 |              SUM(jel.debit_amount_paise) as total_debit,\n  19 |              SUM(jel.credit_amount_paise) as total_credit,\n    at cachedError (/Users/shyam18/SEGA/ERP/node_modules/.pnpm/postgres@3.4.9/node_modules/postgres/cjs/src/query.js:170:23)\n    at Query (/Users/shyam18/SEGA/ERP/node_modules/.pnpm/postgres@3.4.9/node_modules/postgres/cjs/src/query.js:36:24)\n    at DbValidator.sql (/Users/shyam18/SEGA/ERP/node_modules/.pnpm/postgres@3.4.9/node_modules/postgres/cjs/src/index.js:112:11)\n    at /Users/shyam18/SEGA/ERP/tests/integration/database/database-invariants.spec.ts:16:52"
+                        },
+                        {
+                          "location": {
+                            "file": "Error: connect ECONNREFUSED :",
+                            "column": 5433,
+                            "line": 1
+                          },
+                          "message": "Error: connect ECONNREFUSED ::1:5433\n    at Error: connect ECONNREFUSED ::1:5433"
+                        },
+                        {
+                          "message": "Error: connect ECONNREFUSED 127.0.0.1:5433"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-11-25T16:57:04.585Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-database-datab-0e5e3-ust-strictly-balance-Dr-Cr--chromium/error-context.md"
+                        },
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-database-datab-0e5e3-ust-strictly-balance-Dr-Cr--chromium/error-context.md"
+                        },
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-database-datab-0e5e3-ust-strictly-balance-Dr-Cr--chromium/trace.zip"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "/Users/shyam18/SEGA/ERP/tests/integration/database/database-invariants.spec.ts",
+                        "column": 52,
+                        "line": 16
+                      }
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "5ba2310e519ab8d3ecf6-7189c1484c248fa855eb",
+              "file": "integration/database/database-invariants.spec.ts",
+              "line": 15,
+              "column": 7
+            },
+            {
+              "title": "Invariant 2 (Movement-Based Inventory): All stock movements have valid non-null movement types and positive valuation rates on inward movements",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 9,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 9,
+                      "error": {
+                        "message": "AggregateError: ",
+                        "stack": "AggregateError: \n    at cachedError (/Users/shyam18/SEGA/ERP/node_modules/.pnpm/postgres@3.4.9/node_modules/postgres/cjs/src/query.js:170:23)\n    at Query (/Users/shyam18/SEGA/ERP/node_modules/.pnpm/postgres@3.4.9/node_modules/postgres/cjs/src/query.js:36:24)\n    at DbValidator.sql (/Users/shyam18/SEGA/ERP/node_modules/.pnpm/postgres@3.4.9/node_modules/postgres/cjs/src/index.js:112:11)\n    at /Users/shyam18/SEGA/ERP/tests/integration/database/database-invariants.spec.ts:31:46",
+                        "location": {
+                          "file": "/Users/shyam18/SEGA/ERP/tests/integration/database/database-invariants.spec.ts",
+                          "column": 46,
+                          "line": 31
+                        },
+                        "snippet": "  29 |\n  30 |   test('Invariant 2 (Movement-Based Inventory): All stock movements have valid non-null movement types and positive valuation rates on inward movements', async () => {\n> 31 |     const invalidSles = await dbValidator.sql`\n     |                                              ^\n  32 |       SELECT id, document_type, document_number, movement_type, quantity, valuation_rate_paise\n  33 |       FROM stock_ledger_entries\n  34 |       WHERE movement_type IS NULL"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "/Users/shyam18/SEGA/ERP/tests/integration/database/database-invariants.spec.ts",
+                            "column": 46,
+                            "line": 31
+                          },
+                          "message": "AggregateError: \n\n  29 |\n  30 |   test('Invariant 2 (Movement-Based Inventory): All stock movements have valid non-null movement types and positive valuation rates on inward movements', async () => {\n> 31 |     const invalidSles = await dbValidator.sql`\n     |                                              ^\n  32 |       SELECT id, document_type, document_number, movement_type, quantity, valuation_rate_paise\n  33 |       FROM stock_ledger_entries\n  34 |       WHERE movement_type IS NULL\n    at cachedError (/Users/shyam18/SEGA/ERP/node_modules/.pnpm/postgres@3.4.9/node_modules/postgres/cjs/src/query.js:170:23)\n    at Query (/Users/shyam18/SEGA/ERP/node_modules/.pnpm/postgres@3.4.9/node_modules/postgres/cjs/src/query.js:36:24)\n    at DbValidator.sql (/Users/shyam18/SEGA/ERP/node_modules/.pnpm/postgres@3.4.9/node_modules/postgres/cjs/src/index.js:112:11)\n    at /Users/shyam18/SEGA/ERP/tests/integration/database/database-invariants.spec.ts:31:46"
+                        },
+                        {
+                          "location": {
+                            "file": "Error: connect ECONNREFUSED :",
+                            "column": 5433,
+                            "line": 1
+                          },
+                          "message": "Error: connect ECONNREFUSED ::1:5433\n    at Error: connect ECONNREFUSED ::1:5433"
+                        },
+                        {
+                          "message": "Error: connect ECONNREFUSED 127.0.0.1:5433"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-11-25T16:57:04.894Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-database-datab-b8adc-n-rates-on-inward-movements-chromium/error-context.md"
+                        },
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-database-datab-b8adc-n-rates-on-inward-movements-chromium/error-context.md"
+                        },
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-database-datab-b8adc-n-rates-on-inward-movements-chromium/trace.zip"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "/Users/shyam18/SEGA/ERP/tests/integration/database/database-invariants.spec.ts",
+                        "column": 46,
+                        "line": 31
+                      }
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "5ba2310e519ab8d3ecf6-3f7e9f59f920527cfcf5",
+              "file": "integration/database/database-invariants.spec.ts",
+              "line": 30,
+              "column": 7
+            },
+            {
+              "title": "Invariant 3 (Multi-Tenant Isolation): No orphan or cross-tenant records in core transaction ledgers",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 10,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 9,
+                      "error": {
+                        "message": "AggregateError: ",
+                        "stack": "AggregateError: \n    at cachedError (/Users/shyam18/SEGA/ERP/node_modules/.pnpm/postgres@3.4.9/node_modules/postgres/cjs/src/query.js:170:23)\n    at Query (/Users/shyam18/SEGA/ERP/node_modules/.pnpm/postgres@3.4.9/node_modules/postgres/cjs/src/query.js:36:24)\n    at DbValidator.sql (/Users/shyam18/SEGA/ERP/node_modules/.pnpm/postgres@3.4.9/node_modules/postgres/cjs/src/index.js:112:11)\n    at /Users/shyam18/SEGA/ERP/tests/integration/database/database-invariants.spec.ts:42:45",
+                        "location": {
+                          "file": "/Users/shyam18/SEGA/ERP/tests/integration/database/database-invariants.spec.ts",
+                          "column": 45,
+                          "line": 42
+                        },
+                        "snippet": "  40 |\n  41 |   test('Invariant 3 (Multi-Tenant Isolation): No orphan or cross-tenant records in core transaction ledgers', async () => {\n> 42 |     const orphanSles = await dbValidator.sql`\n     |                                             ^\n  43 |       SELECT count(*)::int as count\n  44 |       FROM stock_ledger_entries sle\n  45 |       LEFT JOIN companies c ON sle.company_id = c.id"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "/Users/shyam18/SEGA/ERP/tests/integration/database/database-invariants.spec.ts",
+                            "column": 45,
+                            "line": 42
+                          },
+                          "message": "AggregateError: \n\n  40 |\n  41 |   test('Invariant 3 (Multi-Tenant Isolation): No orphan or cross-tenant records in core transaction ledgers', async () => {\n> 42 |     const orphanSles = await dbValidator.sql`\n     |                                             ^\n  43 |       SELECT count(*)::int as count\n  44 |       FROM stock_ledger_entries sle\n  45 |       LEFT JOIN companies c ON sle.company_id = c.id\n    at cachedError (/Users/shyam18/SEGA/ERP/node_modules/.pnpm/postgres@3.4.9/node_modules/postgres/cjs/src/query.js:170:23)\n    at Query (/Users/shyam18/SEGA/ERP/node_modules/.pnpm/postgres@3.4.9/node_modules/postgres/cjs/src/query.js:36:24)\n    at DbValidator.sql (/Users/shyam18/SEGA/ERP/node_modules/.pnpm/postgres@3.4.9/node_modules/postgres/cjs/src/index.js:112:11)\n    at /Users/shyam18/SEGA/ERP/tests/integration/database/database-invariants.spec.ts:42:45"
+                        },
+                        {
+                          "location": {
+                            "file": "Error: connect ECONNREFUSED :",
+                            "column": 5433,
+                            "line": 1
+                          },
+                          "message": "Error: connect ECONNREFUSED ::1:5433\n    at Error: connect ECONNREFUSED ::1:5433"
+                        },
+                        {
+                          "message": "Error: connect ECONNREFUSED 127.0.0.1:5433"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-11-25T16:57:05.198Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-database-datab-b6427-in-core-transaction-ledgers-chromium/error-context.md"
+                        },
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-database-datab-b6427-in-core-transaction-ledgers-chromium/error-context.md"
+                        },
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-database-datab-b6427-in-core-transaction-ledgers-chromium/trace.zip"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "/Users/shyam18/SEGA/ERP/tests/integration/database/database-invariants.spec.ts",
+                        "column": 45,
+                        "line": 42
+                      }
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "5ba2310e519ab8d3ecf6-738bf540202f1a17f43c",
+              "file": "integration/database/database-invariants.spec.ts",
+              "line": 41,
+              "column": 7
+            },
+            {
+              "title": "Invariant 4 (Auditability): Posted journal entries and stock ledger entries must have recorded creator UUIDs and valid fiscal periods",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 11,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 9,
+                      "error": {
+                        "message": "AggregateError: ",
+                        "stack": "AggregateError: \n    at cachedError (/Users/shyam18/SEGA/ERP/node_modules/.pnpm/postgres@3.4.9/node_modules/postgres/cjs/src/query.js:170:23)\n    at Query (/Users/shyam18/SEGA/ERP/node_modules/.pnpm/postgres@3.4.9/node_modules/postgres/cjs/src/query.js:36:24)\n    at DbValidator.sql (/Users/shyam18/SEGA/ERP/node_modules/.pnpm/postgres@3.4.9/node_modules/postgres/cjs/src/index.js:112:11)\n    at /Users/shyam18/SEGA/ERP/tests/integration/database/database-invariants.spec.ts:60:52",
+                        "location": {
+                          "file": "/Users/shyam18/SEGA/ERP/tests/integration/database/database-invariants.spec.ts",
+                          "column": 52,
+                          "line": 60
+                        },
+                        "snippet": "  58 |\n  59 |   test('Invariant 4 (Auditability): Posted journal entries and stock ledger entries must have recorded creator UUIDs and valid fiscal periods', async () => {\n> 60 |     const unAuditedJournals = await dbValidator.sql`\n     |                                                    ^\n  61 |       SELECT count(*)::int as count\n  62 |       FROM journal_entries\n  63 |       WHERE created_by IS NULL OR fiscal_year IS NULL OR posting_date IS NULL"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "/Users/shyam18/SEGA/ERP/tests/integration/database/database-invariants.spec.ts",
+                            "column": 52,
+                            "line": 60
+                          },
+                          "message": "AggregateError: \n\n  58 |\n  59 |   test('Invariant 4 (Auditability): Posted journal entries and stock ledger entries must have recorded creator UUIDs and valid fiscal periods', async () => {\n> 60 |     const unAuditedJournals = await dbValidator.sql`\n     |                                                    ^\n  61 |       SELECT count(*)::int as count\n  62 |       FROM journal_entries\n  63 |       WHERE created_by IS NULL OR fiscal_year IS NULL OR posting_date IS NULL\n    at cachedError (/Users/shyam18/SEGA/ERP/node_modules/.pnpm/postgres@3.4.9/node_modules/postgres/cjs/src/query.js:170:23)\n    at Query (/Users/shyam18/SEGA/ERP/node_modules/.pnpm/postgres@3.4.9/node_modules/postgres/cjs/src/query.js:36:24)\n    at DbValidator.sql (/Users/shyam18/SEGA/ERP/node_modules/.pnpm/postgres@3.4.9/node_modules/postgres/cjs/src/index.js:112:11)\n    at /Users/shyam18/SEGA/ERP/tests/integration/database/database-invariants.spec.ts:60:52"
+                        },
+                        {
+                          "location": {
+                            "file": "Error: connect ECONNREFUSED :",
+                            "column": 5433,
+                            "line": 1
+                          },
+                          "message": "Error: connect ECONNREFUSED ::1:5433\n    at Error: connect ECONNREFUSED ::1:5433"
+                        },
+                        {
+                          "message": "Error: connect ECONNREFUSED 127.0.0.1:5433"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-11-25T16:57:05.504Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-database-datab-323a1-Ds-and-valid-fiscal-periods-chromium/error-context.md"
+                        },
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-database-datab-323a1-Ds-and-valid-fiscal-periods-chromium/error-context.md"
+                        },
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-database-datab-323a1-Ds-and-valid-fiscal-periods-chromium/trace.zip"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "/Users/shyam18/SEGA/ERP/tests/integration/database/database-invariants.spec.ts",
+                        "column": 52,
+                        "line": 60
+                      }
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "5ba2310e519ab8d3ecf6-93cc0f26bc9d21e8fbc4",
+              "file": "integration/database/database-invariants.spec.ts",
+              "line": 59,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "integration/deep-validation/deep-o2c-financial.spec.ts",
+      "file": "integration/deep-validation/deep-o2c-financial.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "Deep O2C Transactional, Inventory & Financial Validation",
+          "file": "integration/deep-validation/deep-o2c-financial.spec.ts",
+          "line": 6,
+          "column": 6,
+          "specs": [
+            {
+              "title": "Complete Lifecycle: Initial Stock -> SO -> Reservation -> Delivery (COGS) -> Invoice (Revenue) -> Receipt -> Final Reconciliation",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 12,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 0,
+                      "error": {
+                        "message": "TypeError: fetch failed",
+                        "stack": "TypeError: fetch failed",
+                        "cause": {
+                          "message": "AggregateError: ",
+                          "stack": "AggregateError: "
+                        }
+                      },
+                      "errors": [
+                        {
+                          "message": "TypeError: fetch failed\n[cause]: AggregateError: "
+                        },
+                        {
+                          "location": {
+                            "file": "/Users/shyam18/SEGA/ERP/tests/integration/deep-validation/deep-o2c-financial.spec.ts",
+                            "column": 24,
+                            "line": 20
+                          },
+                          "message": "TypeError: Cannot read properties of undefined (reading 'close')\n\n  18 |\n  19 |   test.afterAll(async () => {\n> 20 |     await finValidator.close();\n     |                        ^\n  21 |   });\n  22 |\n  23 |   test('Complete Lifecycle: Initial Stock -> SO -> Reservation -> Delivery (COGS) -> Invoice (Revenue) -> Receipt -> Final Reconciliation', async () => {\n    at /Users/shyam18/SEGA/ERP/tests/integration/deep-validation/deep-o2c-financial.spec.ts:20:24"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-11-25T16:57:05.814Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-deep-validatio-d781d-eipt---Final-Reconciliation-chromium/error-context.md"
+                        },
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-deep-validatio-d781d-eipt---Final-Reconciliation-chromium/error-context.md"
+                        },
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-deep-validatio-d781d-eipt---Final-Reconciliation-chromium/trace.zip"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "d5d6688430095a331ebc-8e18de95f58b44b85d59",
+              "file": "integration/deep-validation/deep-o2c-financial.spec.ts",
+              "line": 23,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "integration/deep-validation/deep-p2p-financial.spec.ts",
+      "file": "integration/deep-validation/deep-p2p-financial.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "Deep P2P Transactional, Inventory & Financial Validation",
+          "file": "integration/deep-validation/deep-p2p-financial.spec.ts",
+          "line": 6,
+          "column": 6,
+          "specs": [
+            {
+              "title": "Complete Lifecycle: Item -> PO -> GRN -> Invoice -> Payment -> Final Multi-Tier Financial Reconciliation",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 13,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 0,
+                      "error": {
+                        "message": "TypeError: fetch failed",
+                        "stack": "TypeError: fetch failed",
+                        "cause": {
+                          "message": "AggregateError: ",
+                          "stack": "AggregateError: "
+                        }
+                      },
+                      "errors": [
+                        {
+                          "message": "TypeError: fetch failed\n[cause]: AggregateError: "
+                        },
+                        {
+                          "location": {
+                            "file": "/Users/shyam18/SEGA/ERP/tests/integration/deep-validation/deep-p2p-financial.spec.ts",
+                            "column": 24,
+                            "line": 20
+                          },
+                          "message": "TypeError: Cannot read properties of undefined (reading 'close')\n\n  18 |\n  19 |   test.afterAll(async () => {\n> 20 |     await finValidator.close();\n     |                        ^\n  21 |   });\n  22 |\n  23 |   test('Complete Lifecycle: Item -> PO -> GRN -> Invoice -> Payment -> Final Multi-Tier Financial Reconciliation', async () => {\n    at /Users/shyam18/SEGA/ERP/tests/integration/deep-validation/deep-p2p-financial.spec.ts:20:24"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-11-25T16:57:06.122Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-deep-validatio-0d5ee-er-Financial-Reconciliation-chromium/error-context.md"
+                        },
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-deep-validatio-0d5ee-er-Financial-Reconciliation-chromium/error-context.md"
+                        },
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "/Users/shyam18/SEGA/ERP/test-results/integration-deep-validatio-0d5ee-er-Financial-Reconciliation-chromium/trace.zip"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "77054e0c5d9d09aa8975-5175747bcfe2ac48bff5",
+              "file": "integration/deep-validation/deep-p2p-financial.spec.ts",
+              "line": 23,
+              "column": 7
+            },
+            {
+              "title": "Advanced Partial Receipts Scenario: 40/100 received -> 60/100 remaining received -> Full invoice match",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": -1,
+                      "parallelIndex": -1,
+                      "status": "skipped",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-11-25T16:57:06.165Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "skipped"
+                }
+              ],
+              "id": "77054e0c5d9d09aa8975-d5aef9194ce4cded93fa",
+              "file": "integration/deep-validation/deep-p2p-financial.spec.ts",
+              "line": 264,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-11-25T16:56:59.207Z",
+    "duration": 6964.696000000001,
+    "expected": 0,
+    "skipped": 8,
+    "unexpected": 14,
+    "flaky": 0
+  }
+}

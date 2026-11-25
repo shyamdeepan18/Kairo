@@ -10,3 +10,7 @@ dist/
 # Database backup dumps (see the `backup` service in docker-compose.yml)
 backups/*.dump
 
+# Test outputs
+test-results/
+docs/qa/reports/playwright-html/
+

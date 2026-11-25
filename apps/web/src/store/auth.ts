@@ -12,6 +12,7 @@ export function resetAllStores() {
     usePermissionStore.setState({ permissions: [], isLoading: false });
     sessionStorage.removeItem('erp-plant');
     sessionStorage.clear();
+    localStorage.removeItem('erp-plant');
   } catch {
     // ignore in environments without storage
   }

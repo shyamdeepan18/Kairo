@@ -20,6 +20,9 @@ import type { FastifyRequest, FastifyReply } from 'fastify';
  */
 export function requireModule(module: string) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    // Platform owner / System admin has full operational and administrative rights across all modules
+    if ((request.user as any)?.isSystemAdmin) return;
+
     // Trusted sources only. request.tenant is set once resolveTenantContext has
     // run; before that (group-level hook order) the same value lives on the
     // verified JWT as request.user.activeCompanyId.
