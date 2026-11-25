@@ -1,173 +1,136 @@
-# Kairo ERP
+# Kairo ERP — Mission-Critical Modular Enterprise Operating Platform
 
-> **🤖 NOTE FOR AI ASSISTANTS & DEVELOPERS:**
-> Before inspecting, modifying, or creating code in this workspace, **you MUST read and adhere strictly to the rules, setup steps, architectural patterns, and database guidelines listed in this README.**
+Kairo is a modular-monolith Enterprise Resource Planning (ERP) platform built with **Fastify, TypeScript, PostgreSQL (Drizzle ORM), and React**. Designed with financial-grade rigor, Kairo enforces double-entry accounting equilibrium, movement-based inventory derivation, and autonomous AI agent operations across discrete and process industries.
 
-Kairo is a modern, highly scalable, multi-tenant Enterprise Resource Planning (ERP) application. It is built to handle complex operations across Accounting, Inventory Management, Manufacturing, Sales, and Purchasing while ensuring strict data separation between tenant companies.
-
----
-
-## 📌 Non-Negotiable Core ERP Principles
-
-When developing or modifying features in this codebase, **always maintain these core constraints**:
-
-1. **Movement-Based Inventory**:
-   * Never directly modify stock quantities or `on_hand` fields.
-   * All inventory changes MUST insert into `inventory_movements` inside an atomic DB transaction.
-2. **Double-Entry Accounting & Ledger Integrity**:
-   * Accounting entries must maintain Debit = Credit equality.
-   * Never delete or update posted journal entry lines; use reversal entries.
-3. **Segregation of Duties (SoD)**:
-   * A document creator or submitter CANNOT approve their own document unless they explicitly possess the `system.bypass_sod` permission (e.g., the Owner role).
-4. **Strict Document Flow Integrity**:
-   * **Purchasing Flow**: Requisition (PR) ➔ Purchase Order (PO) ➔ Goods Receipt (GRN) ➔ AP Invoice
-   * **Sales Flow**: Quotation ➔ Sales Order (SO) ➔ Delivery Note (DN) ➔ Sales Invoice
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.4-blue?style=flat-square&logo=typescript)](https://www.typescriptlang.org/)
+[![Fastify](https://img.shields.io/badge/Fastify-v4-black?style=flat-square&logo=fastify)](https://fastify.dev/)
+[![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react)](https://react.dev/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791?style=flat-square&logo=postgresql)](https://www.postgresql.org/)
+[![Drizzle](https://img.shields.io/badge/ORM-Drizzle-C5F74F?style=flat-square)](https://orm.drizzle.team/)
+[![Turborepo](https://img.shields.io/badge/Monorepo-Turborepo-EF4444?style=flat-square&logo=turborepo)](https://turbo.build/)
 
 ---
 
-## 🚀 Tech Stack
+## 🏛️ System Architecture
 
-Kairo is built inside a modern **Monorepo** architecture using Turborepo and `pnpm` workspaces.
-
-### Frontend (`apps/web`)
-- **Framework**: React 18 with TypeScript
-- **Build Tool**: Vite
-- **UI Component Library**: Ant Design (`antd`)
-- **State Management**: Zustand
-- **Styling**: Vanilla CSS (CSS Variables) with dynamic Light/Dark mode
-
-### Backend (`apps/api`)
-- **Framework**: Fastify (Node.js)
-- **Language**: TypeScript
-- **Authentication**: JWT-based secure authentication with Argon2 / bcrypt hashing
-
-### Database & ORM (`packages/db`)
-- **Database**: PostgreSQL (Dockerized)
-- **ORM**: Drizzle ORM
-- **Migrations**: Handled via Drizzle Kit
-
----
-
-## 🏗️ Project Structure
+Kairo is architected as an **independent modular monolith** (Turborepo + pnpm) to eliminate microservice latency and distributed transaction failures:
 
 ```
-├── apps/
-│   ├── api/       # Fastify REST API backend
-│   └── web/       # React frontend application
-├── packages/
-│   ├── db/        # Drizzle ORM schemas, seeds, and migrations
-│   └── shared/    # Shared types, Zod validators, and constants
-├── AI files/      # AI-generated design documents and planning notes
-└── docker-compose.yml # PostgreSQL database infrastructure
+┌─────────────────────────────────────────────────────────────┐
+│                       apps/web (React 18)                   │
+│   Tailwind CSS • Ant Design • Zustand • Recharts Data Grid   │
+└──────────────────────────────┬──────────────────────────────┘
+                               │ JSON REST API / JWT
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│                       apps/api (Fastify)                    │
+│   Multi-Tenant Context Middleware • Status State Machine     │
+│   Atomic Posting Engine • Stock Ledger Service • Tax Engine │
+└──────────────┬───────────────────────────────┬──────────────┘
+               │ Drizzle ORM Transactions      │ Redis Cache
+               ▼                               ▼
+┌──────────────────────────────┐ ┌────────────────────────────┐
+│      packages/db (PG 16)     │ │        Redis Invalidation   │
+│  Append-Only Stock Ledger &  │ │   Session & Role Cache      │
+│  Balanced Journal Vouchers   │ └────────────────────────────┘
+└──────────────────────────────┘
 ```
 
 ---
 
-## 🛠️ Getting Started
+## 🔒 The Five Non-Negotiable Core Invariants
 
-### Prerequisites
-- **Node.js**: v18+
-- **pnpm**: v9+ (`npm install -g pnpm`)
-- **Docker & Docker Desktop**: For running PostgreSQL database
-
-### Installation & Setup
-
-1. **Install Dependencies**
-   ```bash
-   pnpm install
-   ```
-
-2. **Start the Database**
-   ```bash
-   docker compose up -d
-   ```
-
-3. **Configure Environment Variables**
-   Create a `.env` file in the root directory (based on `.env.example`):
-   ```env
-   DATABASE_URL=postgres://postgres:postgres@localhost:5432/erp
-   JWT_SECRET=your_super_secret_jwt_key
-   ```
-
-4. **Initialize Database Schema & Run Migrations**
-   ```bash
-   pnpm db:migrate
-   ```
-
-5. **Seed Initial Data (Admin Accounts & Roles)**
-   ```bash
-   pnpm --filter @erp/db seed
-   ```
-
-6. **Start Development Servers**
-   ```bash
-   pnpm dev
-   ```
-
-The frontend will be accessible at `http://localhost:5173` and the API server at `http://localhost:3000`.
+1. **Movement-Based Inventory:** Stock balances are strictly derived from append-only `stock_ledger_entries`. `quantity_on_hand` is never directly mutated, avoiding race conditions and audit loss.
+2. **Double-Entry Equilibrium:** Every inventory movement, bill, and payment writes balanced double-entry journal vouchers ($\sum \text{Debits} = \sum \text{Credits}$). Ledger lines are immutable; adjustments occur via reversal entries.
+3. **Multi-Stage Cost Roll-Up:** Valuations dynamically roll up across raw materials, machine runtimes, direct labor absorption, packaging materials, and freight/landed costs.
+4. **Atomic Transaction Isolation:** Any operation touching inventory, accounting, or production executes within an ACID database transaction (`Validate → Lock → Execute → SLE Insert → GL Insert → Audit Log → Commit`).
+5. **Configurable Modularity:** Multi-industry customization is managed via **Dynamic Industry Blueprints** and runtime module licensing rather than divergent code branches.
 
 ---
 
-## 🔐 System Admin Credentials
+## 🤖 Agentic AI & Autonomous Operational Skills (`.agents/skills/`)
 
-To access the System Admin portal (to provision new companies, plants, and users), log in using the seed admin credentials:
-- **Username / Email**: `shyam18@kairo.com`
-- **Password**: `Shyam18`
+Kairo integrates native **AI Agent Skills** and diagnostic runbooks directly into the repository to enable autonomous code analysis, self-healing diagnostic procedures, and safe feature development:
+
+| Agent Skill | Purpose & Operational Capability |
+|---|---|
+| [`erp-accounting-and-gl`](.agents/skills/erp-accounting-and-gl/SKILL.md) | Architectural specifications, posting engine templates, double-entry invariants, and bank reconciliation. |
+| [`erp-inventory-and-valuation`](.agents/skills/erp-inventory-and-valuation/SKILL.md) | Weighted Average Cost (WAC) models, batch/FEFO enforcement, and catch-weight dual UOM. |
+| [`erp-manufacturing-and-subcontracting`](.agents/skills/erp-manufacturing-and-subcontracting/SKILL.md) | Multi-stage shopfloor routing, cost roll-ups, job work orders, and outward/inward challans. |
+| [`erp-purchase-and-p2p`](.agents/skills/erp-purchase-and-p2p/SKILL.md) | Procure-to-Pay lifecycle (Blanket POs, GRN, Landed Cost Vouchers, Returns, Debit Notes). |
+| [`erp-sales-and-o2c`](.agents/skills/erp-sales-and-o2c/SKILL.md) | Order-to-Cash lifecycle, real-time stock reservations, Quick POS billing, and credit limits. |
+| [`erp-rbac-and-diagnostics`](.agents/skills/erp-rbac-and-diagnostics/SKILL.md) | Diagnostic runbooks for plant/tenant scope resolution, Redis cache invalidation, and DB synchronization. |
 
 ---
 
-## 🧹 Clearing Transactional Data (Keeping Admin Accounts)
+## 🧪 Deep Verification & Test Coverage
 
-If you need to wipe out test transactional data (orders, invoices, receipts, stock movements) while preserving admin logins and master configurations, run:
+Kairo includes a comprehensive Playwright-based test suite located in [`tests/`](tests/) validating full business cycles and database invariants:
 
-### Command Line Script:
+- **22 Integration & Invariant Suites:**
+  - Complete Procure-to-Pay (P2P) with partial receipts & 3-way match.
+  - Complete Order-to-Cash (O2C) with stock reservations and COGS recognition.
+  - Subcontracting & Outside Job Work (GAP 4) with inward fee capitalization.
+  - Landed Cost Voucher (GAP 3) with retroactive WAC adjustments.
+  - Database Invariants: 100% debit-credit equilibrium checks across all posted journals.
+
+Run all tests:
 ```bash
-pnpm tsx apps/api/src/scripts/reset-all-data.ts
-```
-
-### Direct SQL Query (via psql or Drizzle Studio):
-```sql
-TRUNCATE TABLE 
-  inventory_movements,
-  stock_ledger,
-  journal_entry_lines,
-  journal_entries,
-  sales_invoice_lines,
-  sales_invoices,
-  delivery_note_lines,
-  delivery_notes,
-  sales_order_lines,
-  sales_orders,
-  sales_quotation_lines,
-  sales_quotations,
-  ap_invoice_lines,
-  ap_invoices,
-  grn_lines,
-  goods_receipt_notes,
-  purchase_order_lines,
-  purchase_orders,
-  purchase_requisition_lines,
-  purchase_requisitions,
-  customer_receipts,
-  supplier_payments,
-  approval_actions,
-  approval_requests
-CASCADE;
+pnpm test:regression
 ```
 
 ---
 
-## 🧩 Core Modules
+## 🚀 Quickstart & Local Setup
 
-- **Admin Portal**: Tenant, license, role, and plant provisioning.
-- **Accounting**: General Ledger, Chart of Accounts, Journal Vouchers, Financial Reporting (AP/AR Aging).
-- **Inventory**: Real-time stock tracking, Multi-warehouse management, Stock adjustments, and transfers.
-- **Manufacturing**: Bills of Material (BOM), Work Centres, Production Orders, Cost Roll-up.
-- **Purchasing**: Purchase Requisitions, Purchase Orders, Goods Receipt (GRN), Supplier Invoicing.
-- **Sales**: Quotations, Sales Orders, Deliveries, Sales Invoicing.
+### 1. Prerequisites
+- Node.js 20+
+- pnpm 9+
+- Docker & Docker Compose
+
+### 2. Start Supporting Infrastructure
+```bash
+docker compose up -d postgres redis
+```
+
+### 3. Install Dependencies & Build Packages
+```bash
+pnpm install
+pnpm build
+```
+
+### 4. Database Setup
+```bash
+pnpm db:migrate
+```
+
+### 5. Start Development Servers
+```bash
+pnpm dev
+```
+- **Web UI:** `http://localhost:5173`
+- **Fastify API:** `http://localhost:3000`
 
 ---
 
-## 📝 License
+## 📦 Monorepo Layout
 
-Proprietary Software. All rights reserved.
+```
+├── .agents/skills/            # Agentic AI skills & diagnostic runbooks
+├── apps/
+│   ├── api/                   # Fastify TypeScript REST API
+│   │   ├── src/plugins/       # Error handling, auth, audit, sales plugins
+│   │   ├── src/routes/        # Modular route controllers (accounting, sales, purchase, etc.)
+│   │   └── src/services/      # Core engines (Posting, Stock Ledger, Status Engine)
+│   └── web/                   # React 18 single-page application (Tailwind + Ant Design)
+├── packages/
+│   ├── db/                    # PostgreSQL Drizzle schemas, migrations, and seeds
+│   └── shared/                # Shared Zod validators, TypeScript contracts, and constants
+├── tests/                     # Playwright integration, E2E, and financial verification tests
+└── docs/                      # Architectural maps, workflows, and QA defect triage reports
+```
+
+---
+
+## 📜 License
+Proprietary & Confidential. All rights reserved.
